@@ -1,0 +1,41 @@
+# Rust build output
+/target/
+
+# Cargo lock files (the application lock file is generated locally/CI)
+Cargo.lock
+*.lock
+
+# Logs and runtime output
+*.log
+logs/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Release archives
+*.tar.gz
+*.zip
+*.dmg
+*.msi
