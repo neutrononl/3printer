@@ -14,9 +14,10 @@ pub enum Action {
 	Front,
 	Help,
 	License,
+	Updates,
 }
 impl Action {
-	pub const ALL: [Self; 10] = [
+	pub const ALL: [Self; 11] = [
 		Self::Import,
 		Self::Open,
 		Self::Save,
@@ -27,12 +28,13 @@ impl Action {
 		Self::Front,
 		Self::Help,
 		Self::License,
+		Self::Updates,
 	];
 	pub fn group(self) -> &'static str {
 		match self {
 			Self::Import | Self::Open | Self::Save => "File",
 			Self::Undo | Self::Clear => "Edit",
-			Self::Help | Self::License => "Help",
+			Self::Help | Self::License | Self::Updates => "Help",
 			_ => "View",
 		}
 	}
@@ -48,6 +50,7 @@ impl Action {
 			Self::Front => "Front",
 			Self::Help => "Workspace help",
 			Self::License => "License",
+			Self::Updates => "Check for updates",
 		}
 	}
 	pub fn icon(self) -> &'static str {
@@ -62,10 +65,11 @@ impl Action {
 			Self::Front => "front",
 			Self::Help => "help",
 			Self::License => "license",
+			Self::Updates => "rotate-cw-clock",
 		}
 	}
 	pub fn shortcut(self) -> Option<KeyboardShortcut> {
-		if self == Self::License {
+		if matches!(self, Self::License | Self::Updates) {
 			return None;
 		}
 		Some(KeyboardShortcut::new(
@@ -85,6 +89,7 @@ impl Action {
 				Self::Front => Key::Num3,
 				Self::Help => Key::Slash,
 				Self::License => Key::L,
+				Self::Updates => Key::U,
 			},
 		))
 	}
@@ -180,6 +185,7 @@ pub mod native {
 						Action::Front => "3",
 						Action::Help => "/",
 						Action::License => "",
+						Action::Updates => "",
 					};
 					let item: *mut Object = msg_send![class!(NSMenuItem), alloc];
 					let item: *mut Object = msg_send![item, initWithTitle: string(action.label()) action: sel!(performPrinter3Action:) keyEquivalent: string(key)];
@@ -198,6 +204,7 @@ pub mod native {
 						Action::Front => "square",
 						Action::Help => "questionmark.circle",
 						Action::License => "doc.text",
+						Action::Updates => "arrow.clockwise.circle",
 					};
 					let image: *mut Object = msg_send![class!(NSImage), imageWithSystemSymbolName: string(symbol) accessibilityDescription: string(action.label())];
 					if !image.is_null() {
@@ -244,7 +251,9 @@ mod tests {
 			assert!(!action.label().contains('…'));
 			assert!(!action.icon().is_empty());
 			for other in Action::ALL.iter().skip(index + 1) {
-				assert_ne!(action.shortcut(), other.shortcut());
+				if action.shortcut().is_some() && other.shortcut().is_some() {
+					assert_ne!(action.shortcut(), other.shortcut());
+				}
 			}
 		}
 	}

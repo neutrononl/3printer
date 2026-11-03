@@ -5,6 +5,7 @@ mod icons;
 mod menus;
 mod printer;
 mod printer_ui;
+mod updater;
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 use geometry::*;
 const BLUE: Color32 = Color32::from_rgb(30, 159, 215);
@@ -67,6 +68,7 @@ struct Studio {
 	preview: bool,
 	show_settings: bool,
 	show_help: bool,
+	show_updates: bool,
 	show_license: bool,
 	status: String,
 	yaw: f32,
@@ -77,6 +79,10 @@ struct Studio {
 	frame: u32,
 	screenshot: Option<String>,
 	requested: bool,
+	update: updater::UpdateState,
+	show_update_prompt: bool,
+	update_message: String,
+	update_after_download: bool,
 }
 impl Studio {
 	fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -108,6 +114,11 @@ impl Studio {
 		let mut settings = Settings::default();
 		settings.printer = printers[0].clone();
 		settings.nozzle = settings.printer.nozzle;
+		let auto_check = updater::load_auto_check();
+		let mut update = updater::UpdateState::new(auto_check);
+		if auto_check {
+			update.start_check();
+		}
 		Self {
 			printers,
 			printer_message: String::new(),
@@ -147,6 +158,7 @@ impl Studio {
 			preview: false,
 			show_settings: false,
 			show_help: false,
+			show_updates: false,
 			show_license: false,
 			status: "Ready · Import a model to begin".into(),
 			yaw: -0.65,
@@ -157,6 +169,10 @@ impl Studio {
 			frame: 0,
 			screenshot: std::env::args().skip_while(|a| a != "--screenshot").nth(1),
 			requested: false,
+			update,
+			show_update_prompt: false,
+			update_message: String::new(),
+			update_after_download: false,
 		}
 	}
 	fn printers_path() -> std::path::PathBuf {
@@ -771,6 +787,10 @@ impl Studio {
 			}
 			menus::Action::Help => self.show_help = true,
 			menus::Action::License => self.show_license = true,
+			menus::Action::Updates => {
+				self.show_updates = true;
+				self.update.start_check();
+			}
 		}
 	}
 	fn top(&mut self, ctx: &egui::Context) {
@@ -1843,6 +1863,39 @@ impl Studio {
 }
 impl eframe::App for Studio {
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		if let Some(event) = self.update.poll() {
+			match event {
+				updater::UpdateEvent::Available => {
+					self.update_message = "A newer version is available".into();
+					if self.update.auto_check {
+						self.show_update_prompt = true;
+					}
+				}
+				updater::UpdateEvent::UpToDate => self.update_message = "You have the latest version".into(),
+				updater::UpdateEvent::CheckFailed => {
+					self.update_message = "Could not check for updates".into()
+				}
+				updater::UpdateEvent::Downloaded => {
+					self.update_message = "Update downloaded and ready to install".into();
+					if self.update_after_download && !self.has_unsaved_changes() {
+						match self.update.install_and_restart() {
+							Ok(()) => {
+								self.allow_close = true;
+								ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+							}
+							Err(error) => self.update_message = error,
+						}
+						self.update_after_download = false;
+					} else {
+						self.show_update_prompt = true;
+					}
+				}
+				updater::UpdateEvent::DownloadFailed => self.update_message = "Update download failed".into(),
+			}
+		}
+		if self.update.checking || self.update.downloading {
+			ctx.request_repaint_after(std::time::Duration::from_millis(100));
+		}
 		if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.has_unsaved_changes() {
 			ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
 			let answer = rfd::MessageDialog::new()
@@ -2244,6 +2297,144 @@ impl eframe::App for Studio {
 				ui.label("3printer includes a basic local slicer with single-wall contours, alternating line infill, and support pillars. Cloud services, network printing, model repair, and the original advanced slicing engine are not connected.");
 				ui.colored_label(Color32::YELLOW, "G-code is experimental. Inspect toolpaths and verify printer compatibility before using it with hardware.");
 			});
+		if self.show_updates {
+			let mut show = self.show_updates;
+			egui::Window::new("3printer Updates")
+				.open(&mut show)
+				.resizable(false)
+				.default_width(420.)
+				.show(ctx, |ui| {
+					ui.heading("Updates");
+					ui.label(format!(
+						"Current version: {} · {}",
+						updater::CURRENT_VERSION,
+						updater::platform_name()
+					));
+					let previous = self.update.auto_check;
+					ui.checkbox(&mut self.update.auto_check, "Check for updates automatically");
+					if previous != self.update.auto_check {
+						updater::save_auto_check(self.update.auto_check);
+					}
+					if self.update.checking {
+						ui.label("Checking GitHub for the latest release…");
+					} else if self.update.downloading {
+						ui.label("Downloading update in the background…");
+					} else if let Some(version) =
+						self.update.latest.as_ref().map(|release| release.version.clone())
+					{
+						ui.label(format!("Latest version: {version}"));
+						if ui
+							.button(if self.update.downloaded.is_some() {
+								"Install and restart"
+							} else {
+								"Update now"
+							})
+							.clicked()
+						{
+							self.show_update_prompt = true;
+							if self.update.downloaded.is_none() {
+								self.update_after_download = true;
+								self.update.start_download();
+							}
+						}
+					} else if self.update.checked && self.update.error.is_none() {
+						ui.label("You have the latest version.");
+					}
+					if let Some(error) = &self.update.error {
+						let color = if error.starts_with("No published release") {
+							Color32::LIGHT_YELLOW
+						} else {
+							Color32::LIGHT_RED
+						};
+						ui.colored_label(color, error);
+					}
+					if !self.update_message.is_empty() {
+						ui.label(&self.update_message);
+					}
+					if ui
+						.add_enabled(
+							!self.update.checking && !self.update.downloading,
+							egui::Button::new("Check now"),
+						)
+						.clicked()
+					{
+						self.update.start_check();
+					}
+				});
+			self.show_updates = show;
+		}
+		if self.show_update_prompt {
+			let mut open = true;
+			let mut cancel = false;
+			let mut download = false;
+			let mut install = false;
+			egui::Window::new("Update available")
+				.open(&mut open)
+				.collapsible(false)
+				.resizable(false)
+				.show(ctx, |ui| {
+					if let Some(release) = &self.update.latest {
+						ui.label(format!(
+							"3printer {} is available (you have {}).",
+							release.version,
+							updater::CURRENT_VERSION
+						));
+						ui.label(format!(
+							"Download for {}: {}",
+							updater::platform_name(),
+							release.asset_name
+						));
+					}
+					if self.update.downloading {
+						ui.label("Downloading in the background…");
+					} else if self.update.downloaded.is_some() {
+						ui.label("The update is ready. Restart 3printer to install it.");
+					}
+					ui.horizontal(|ui| {
+						if ui.button("Cancel").clicked() {
+							cancel = true;
+						}
+						if ui
+							.add_enabled(
+								!self.update.downloading,
+								egui::Button::new(if self.update.downloaded.is_some() {
+									"Update now"
+								} else {
+									"Download and update"
+								}),
+							)
+							.clicked()
+						{
+							if self.update.downloaded.is_some() {
+								install = true;
+							} else {
+								download = true;
+							}
+						}
+					});
+				});
+			if cancel {
+				open = false;
+			}
+			self.show_update_prompt = open;
+			if download {
+				self.update_after_download = true;
+				self.update.start_download();
+			}
+			if install {
+				if self.has_unsaved_changes() {
+					self.update_message = "Save or discard project changes before updating.".into();
+				} else {
+					match self.update.install_and_restart() {
+						Ok(()) => {
+							self.allow_close = true;
+							ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+						}
+						Err(error) => self.update_message = error,
+					}
+				}
+			}
+		}
 		if self.show_license {
 			egui::Window::new("3printer License")
 				.open(&mut self.show_license)
