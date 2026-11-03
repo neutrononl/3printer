@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem with Craft Print
+description: Report a reproducible problem in 3printer.
 title: "[Bug]: "
 labels:
   - bug
@@ -7,42 +7,40 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Craft Print. Please provide enough detail to reproduce the problem.
+        Thanks for helping improve 3printer. Please provide enough detail to reproduce the problem.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which 3printer version are you using?
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      description: Include the OS version and architecture if known.
+      placeholder: macOS 15 arm64
+    validations:
+      required: true
   - type: textarea
     id: description
     attributes:
       label: What happened?
-      description: Describe the problem and what you expected to happen.
+      description: Describe the problem clearly.
     validations:
       required: true
   - type: textarea
-    id: reproduction
+    id: steps
     attributes:
       label: Steps to reproduce
-      placeholder: |
-        1. Open ...
-        2. Select ...
-        3. See ...
-    validations:
-      required: true
-  - type: input
-    id: version
-    attributes:
-      label: Craft Print version
-      placeholder: e.g. 0.1.0
-  - type: dropdown
-    id: operating-system
-    attributes:
-      label: Operating system
-      options:
-        - macOS
-        - Windows
-        - Linux
-        - Other
+      description: List the actions that lead to the problem.
     validations:
       required: true
   - type: textarea
-    id: logs
+    id: expected
     attributes:
-      label: Additional context or logs
-      description: Include relevant logs, screenshots, or sample files. Remove private information first.
+      label: Expected behavior
+    validations:
+      required: true

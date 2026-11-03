@@ -32,5 +32,16 @@ cp Info.plist "$APP_DIR/Contents/Info.plist"
 cp "$ICONSET_DIR/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 chmod +x "$APP_DIR/Contents/MacOS/3printer"
 
+# Seal the complete bundle so macOS does not mistake an incomplete bundle for
+# a damaged application. Set MACOS_SIGNING_IDENTITY to a Developer ID
+# certificate for Gatekeeper-approved distribution; '-' is local ad-hoc signing.
+MACOS_SIGNING_IDENTITY="${MACOS_SIGNING_IDENTITY:--}"
+codesign --force --deep --sign "$MACOS_SIGNING_IDENTITY" --timestamp=none "$APP_DIR"
+
+if [[ -n "${MACOS_NOTARY_PROFILE:-}" ]]; then
+	xcrun notarytool submit "$APP_DIR" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+	xcrun stapler staple "$APP_DIR"
+fi
+
 echo "Created $APP_DIR"
 echo "Open it with: open '$APP_DIR'"

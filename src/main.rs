@@ -8,10 +8,30 @@ mod printer_ui;
 mod updater;
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 use geometry::*;
+use std::process::Command;
 const BLUE: Color32 = Color32::from_rgb(30, 159, 215);
 const BUTTON_BLUE: Color32 = Color32::from_rgb(18, 94, 145);
 const MUTED: Color32 = Color32::from_rgb(156, 165, 178);
 const TITLE: Color32 = Color32::from_rgb(225, 228, 235);
+
+fn open_github_issue(url: &str) -> Result<(), String> {
+	#[cfg(target_os = "macos")]
+	let mut command = Command::new("open");
+	#[cfg(target_os = "linux")]
+	let mut command = Command::new("xdg-open");
+	#[cfg(target_os = "windows")]
+	let mut command = {
+		let mut command = Command::new("cmd");
+		command.args(["/C", "start", ""]);
+		command
+	};
+	command
+		.arg(url)
+		.spawn()
+		.map(|_| ())
+		.map_err(|error| format!("Could not open GitHub: {error}"))
+}
+
 fn kebab_name(name: &str, fallback: &str) -> String {
 	let name = name
 		.split(|c: char| !c.is_alphanumeric())
@@ -2284,6 +2304,22 @@ impl eframe::App for Studio {
 			.resizable(true)
 			.show(ctx, |ui| {
 				ui.heading("3printer");
+				ui.horizontal(|ui| {
+					if ui.button("Report bug").clicked() {
+						if let Err(error) = open_github_issue(
+							"https://github.com/rastislavcore/3printer/issues/new?template=bug_report.yml",
+						) {
+							self.status = error;
+						}
+					}
+					if ui.button("Request feature").clicked() {
+						if let Err(error) = open_github_issue(
+							"https://github.com/rastislavcore/3printer/issues/new?template=feature_request.yml",
+						) {
+							self.status = error;
+						}
+					}
+				});
 				ui.label("A local desktop workspace for preparing models for 3D printing.");
 				ui.separator();
 				ui.strong("Workflow");

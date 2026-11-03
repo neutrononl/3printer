@@ -65,7 +65,7 @@ impl Action {
 			Self::Front => "front",
 			Self::Help => "help",
 			Self::License => "license",
-			Self::Updates => "rotate-cw-clock",
+			Self::Updates => "clock",
 		}
 	}
 	pub fn shortcut(self) -> Option<KeyboardShortcut> {
@@ -204,7 +204,7 @@ pub mod native {
 						Action::Front => "square",
 						Action::Help => "questionmark.circle",
 						Action::License => "doc.text",
-						Action::Updates => "arrow.clockwise.circle",
+						Action::Updates => "clock",
 					};
 					let image: *mut Object = msg_send![class!(NSImage), imageWithSystemSymbolName: string(symbol) accessibilityDescription: string(action.label())];
 					if !image.is_null() {

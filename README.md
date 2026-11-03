@@ -47,8 +47,13 @@ open dist/3printer.app
 ```
 
 This creates `dist/3printer.app`. It can be opened by double-clicking it or
-dragged into `/Applications`. The package is unsigned, so macOS may ask for
-confirmation the first time it is opened.
+dragged into `/Applications`. The default ad-hoc signature may still be
+blocked by Gatekeeper when the app is downloaded from the internet.
+
+The packager seals the app bundle with an ad-hoc signature by default. For a
+Gatekeeper-approved release, set `MACOS_SIGNING_IDENTITY` to a Developer ID
+certificate and optionally `MACOS_NOTARY_PROFILE` to a configured
+`notarytool` keychain profile before packaging.
 
 On Linux, create a clickable desktop launcher:
 

@@ -1,28 +1,31 @@
 name: Feature request
-description: Suggest an improvement for Craft Print
+description: Suggest an improvement or new capability for 3printer.
 title: "[Feature]: "
 labels:
   - enhancement
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape the future of 3printer.
   - type: textarea
     id: problem
     attributes:
-      label: What problem would this solve?
-      description: Explain the use case or limitation you are experiencing.
+      label: Problem to solve
+      description: What would this feature help you do?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
-      description: Describe the feature you would like to see.
+      description: Describe the behavior or workflow you would like.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
-  - type: textarea
-    id: context
-    attributes:
-      label: Additional context
+      description: What workarounds or alternative solutions have you tried?
+    validations:
+      required: false
