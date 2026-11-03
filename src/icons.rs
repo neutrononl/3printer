@@ -235,7 +235,19 @@ pub fn set_dock_icon() {
 			std::mem::transmute(objc_msgSend as *const ());
 		let send_arg: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void =
 			std::mem::transmute(objc_msgSend as *const ());
-		let path = CString::new(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/app-icon.png")).unwrap();
+		let bundle_icon = std::env::current_exe()
+			.ok()
+			.and_then(|exe| {
+				exe.parent()
+					.and_then(|dir| dir.parent())
+					.map(std::path::Path::to_path_buf)
+			})
+			.map(|contents| contents.join("Resources/AppIcon.icns"))
+			.filter(|path| path.exists());
+		let path = bundle_icon.unwrap_or_else(|| {
+			std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/app-icon.png"))
+		});
+		let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
 		let string = send_arg(
 			class("NSString"),
 			sel("stringWithUTF8String:"),

@@ -35,6 +35,7 @@ Desktop.ini
 *.swo
 
 # Release archives
+/dist/
 *.tar.gz
 *.zip
 *.dmg

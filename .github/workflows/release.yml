@@ -1,4 +1,4 @@
-name: Build release
+name: Build release apps
 
 on:
   release:
@@ -8,51 +8,56 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.platform }}
+  macos:
     if: ${{ !github.event.release.prerelease }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: Linux
-            os: ubuntu-latest
-            binary: 3printer
-            archive: 3printer-linux-x86_64.tar.gz
-          - platform: macOS
-            os: macos-latest
-            binary: 3printer
-            archive: 3printer-macos.tar.gz
-          - platform: Windows
-            os: windows-latest
-            binary: 3printer.exe
-            archive: 3printer-windows-x86_64.zip
-
+    runs-on: macos-latest
     steps:
-      - name: Check out tagged release
+      - name: Check out source
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name }}
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Package Unix binary
-        if: runner.os != 'Windows'
-        shell: bash
-        run: tar -czf "${{ matrix.archive }}" -C target/release "${{ matrix.binary }}"
-
-      - name: Package Windows binary
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Compress-Archive -Path "target/release/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
-
+      - name: Build app bundle
+        run: ./scripts/package-macos.sh
+      - name: Create release archive
+        run: ditto -c -k --keepParent dist/3printer.app "3printer-${{ github.event.release.tag_name }}-macos.zip"
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: ${{ matrix.archive }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "3printer-${{ github.event.release.tag_name }}-macos.zip" --clobber
+
+  linux:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build Linux app
+        run: ./scripts/package-linux.sh
+      - name: Create release archive
+        run: tar -czf "3printer-${{ github.event.release.tag_name }}-linux.tar.gz" -C dist 3printer-linux
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "3printer-${{ github.event.release.tag_name }}-linux.tar.gz" --clobber
+
+  windows:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows app
+        shell: pwsh
+        run: .\scripts\package-windows.ps1
+      - name: Create release archive
+        shell: pwsh
+        run: Compress-Archive -Path dist\3printer-windows -DestinationPath "3printer-${{ github.event.release.tag_name }}-windows.zip" -Force
+      - name: Upload release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "3printer-${{ github.event.release.tag_name }}-windows.zip" --clobber
