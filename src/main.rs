@@ -117,7 +117,7 @@ impl Studio {
 		style.visuals.panel_fill = Color32::from_rgb(40, 43, 49);
 		style.visuals.window_fill = Color32::from_rgb(47, 51, 58);
 		style.visuals.selection.bg_fill = BUTTON_BLUE;
-		style.visuals.selection.stroke = Stroke::new(1., Color32::WHITE);
+		style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
 		// Selected buttons inherit the current interaction state's text color.
 		// Keep idle, hovered and pressed labels legible on the blue fill.
 		style.visuals.widgets.inactive.fg_stroke.color = Color32::from_gray(240);
@@ -1157,7 +1157,7 @@ impl Studio {
 						.fill(Color32::from_rgb(31, 34, 39))
 						.inner_margin(12.)
 						.corner_radius(10.)
-						.stroke(Stroke::new(1., Color32::from_rgb(57, 63, 72)))
+						.stroke(Stroke::new(1.0_f32, Color32::from_rgb(57, 63, 72)))
 						.show(ui, |ui| {
 							ui.set_min_height(82.);
 							ui.set_min_width((panel_width - 26.).max(0.));
@@ -1596,7 +1596,7 @@ impl Studio {
 						plate.to_vec()
 					},
 					Color32::from_rgb(59, 64, 70),
-					Stroke::new(1.5, Color32::from_rgb(90, 100, 111)),
+					Stroke::new(1.5_f32, Color32::from_rgb(90, 100, 111)),
 				));
 				for axis in 0..2 {
 					let limit = if axis == 0 { width } else { depth };
@@ -1613,8 +1613,10 @@ impl Studio {
 							a[1 - axis] = half - span;
 							b[1 - axis] = half + span;
 						}
-						painter
-							.line_segment([project(a), project(b)], Stroke::new(0.7, Color32::from_gray(85)));
+						painter.line_segment(
+							[project(a), project(b)],
+							Stroke::new(0.7_f32, Color32::from_gray(85)),
+						);
 					}
 				}
 				for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
@@ -1626,11 +1628,11 @@ impl Studio {
 					];
 					painter.line_segment(
 						[project(corners[a]), project(corners[b])],
-						Stroke::new(0.6, Color32::from_rgb(69, 75, 83)),
+						Stroke::new(0.6_f32, Color32::from_rgb(69, 75, 83)),
 					);
 					painter.line_segment(
 						[plate[a], project(corners[a])],
-						Stroke::new(0.6, Color32::from_rgb(69, 75, 83)),
+						Stroke::new(0.6_f32, Color32::from_rgb(69, 75, 83)),
 					);
 				}
 				if self.preview {
@@ -1663,7 +1665,7 @@ impl Studio {
 							{
 								painter.line_segment(
 									[project([a[0], a[1], l.z]), project([b[0], b[1], l.z])],
-									Stroke::new(if current { 1.5 } else { 0.5 }, color),
+									Stroke::new(if current { 1.5_f32 } else { 0.5_f32 }, color),
 								);
 							}
 						}
@@ -1742,7 +1744,7 @@ impl Studio {
 									};
 									painter.line_segment(
 										[project(v), project(end)],
-										Stroke::new(2., Color32::from_rgb(65, 220, 240)),
+										Stroke::new(2.0_f32, Color32::from_rgb(65, 220, 240)),
 									);
 								}
 							}
@@ -1760,7 +1762,7 @@ impl Studio {
 										project(v)
 									})
 									.collect();
-								painter.add(egui::Shape::line(points, Stroke::new(2., color)));
+								painter.add(egui::Shape::line(points, Stroke::new(2.0_f32, color)));
 							} else if matches!(self.tool, Tool::Move | Tool::Scale) {
 								let mut end = pivot;
 								end[a] += 35.;
@@ -1774,7 +1776,7 @@ impl Studio {
 								painter.arrow(
 									project(pivot),
 									project(end) - project(pivot),
-									Stroke::new(3., color),
+									Stroke::new(3.0_f32, color),
 								);
 								painter.text(
 									project(end),
@@ -1799,7 +1801,7 @@ impl Studio {
 					([0., 0., 30.], Color32::from_rgb(77, 143, 255), "Z"),
 				] {
 					let p = project([v[0] + machine_origin[0], v[1] + machine_origin[1], v[2]]);
-					painter.line_segment([origin, p], Stroke::new(2., color));
+					painter.line_segment([origin, p], Stroke::new(2.0_f32, color));
 					painter.text(
 						p,
 						egui::Align2::CENTER_BOTTOM,

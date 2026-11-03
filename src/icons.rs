@@ -168,7 +168,7 @@ fn paint(p: &egui::Painter, origin: Pos2, name: &str, color: Color32) {
 			path.iter()
 				.map(|v| origin + Vec2::new(v[0], v[1]) * 0.8)
 				.collect(),
-			Stroke::new(1.6, color),
+			Stroke::new(1.6_f32, color),
 		));
 	}
 }
