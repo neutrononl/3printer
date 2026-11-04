@@ -102,7 +102,6 @@ struct Studio {
 	update: updater::UpdateState,
 	show_update_prompt: bool,
 	update_message: String,
-	update_after_download: bool,
 }
 impl Studio {
 	fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -192,7 +191,6 @@ impl Studio {
 			update,
 			show_update_prompt: false,
 			update_message: String::new(),
-			update_after_download: false,
 		}
 	}
 	fn printers_path() -> std::path::PathBuf {
@@ -808,7 +806,7 @@ impl Studio {
 			menus::Action::Help => self.show_help = true,
 			menus::Action::License => self.show_license = true,
 			menus::Action::Updates => {
-				self.show_updates = true;
+				self.show_update_prompt = true;
 				self.update.start_check();
 			}
 		}
@@ -1898,19 +1896,8 @@ impl eframe::App for Studio {
 					self.update_message = "Could not check for updates".into()
 				}
 				updater::UpdateEvent::Downloaded => {
-					self.update_message = "Update downloaded and ready to install".into();
-					if self.update_after_download && !self.has_unsaved_changes() {
-						match self.update.install_and_restart() {
-							Ok(()) => {
-								self.allow_close = true;
-								ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-							}
-							Err(error) => self.update_message = error,
-						}
-						self.update_after_download = false;
-					} else {
-						self.show_update_prompt = true;
-					}
+					self.update_message = "Download verified. Ready to install.".into();
+					self.show_update_prompt = true;
 				}
 				updater::UpdateEvent::DownloadFailed => self.update_message = "Update download failed".into(),
 			}
@@ -2306,6 +2293,10 @@ impl eframe::App for Studio {
 			.resizable(true)
 			.show(ctx, |ui| {
 				ui.heading("3printer");
+				ui.label(format!("Version {} · {}", updater::CURRENT_VERSION, updater::platform_name()));
+				if self.update.latest.is_some() && ui.button("Update now").clicked() {
+					self.show_update_prompt = true;
+				}
 				ui.horizontal(|ui| {
 					if ui.button("Report bug").clicked() {
 						if let Err(error) = open_github_issue(
@@ -2361,19 +2352,8 @@ impl eframe::App for Studio {
 						self.update.latest.as_ref().map(|release| release.version.clone())
 					{
 						ui.label(format!("Latest version: {version}"));
-						if ui
-							.button(if self.update.downloaded.is_some() {
-								"Install and restart"
-							} else {
-								"Update now"
-							})
-							.clicked()
-						{
+						if ui.button("Update now").clicked() {
 							self.show_update_prompt = true;
-							if self.update.downloaded.is_none() {
-								self.update_after_download = true;
-								self.update.start_download();
-							}
 						}
 					} else if self.update.checked && self.update.error.is_none() {
 						ui.label("You have the latest version.");
@@ -2391,7 +2371,9 @@ impl eframe::App for Studio {
 					}
 					if ui
 						.add_enabled(
-							!self.update.checking && !self.update.downloading,
+							!self.update.checking
+								&& !self.update.downloading
+								&& !self.update.paused && self.update.downloaded.is_none(),
 							egui::Button::new("Check now"),
 						)
 						.clicked()
@@ -2405,40 +2387,88 @@ impl eframe::App for Studio {
 			let mut open = true;
 			let mut cancel = false;
 			let mut download = false;
+			let mut pause = false;
 			let mut install = false;
 			egui::Window::new("Update available")
 				.open(&mut open)
 				.collapsible(false)
 				.resizable(false)
+				.default_width(460.)
 				.show(ctx, |ui| {
+					ui.heading(if self.update.downloaded.is_some() {
+						"Ready to install"
+					} else {
+						"3printer update"
+					});
+					ui.add_space(5.);
 					if let Some(release) = &self.update.latest {
+						ui.label(
+							RichText::new(format!(
+								"Version {}  →  {}",
+								updater::CURRENT_VERSION,
+								release.version
+							))
+							.size(16.)
+							.strong(),
+						);
+						ui.label(format!("{} · {}", updater::platform_name(), release.asset_name));
+					}
+					ui.add_space(8.);
+					if self.update.downloading || self.update.paused || self.update.downloaded.is_some() {
+						let fraction = if self.update.total_bytes > 0 {
+							(self.update.downloaded_bytes as f32 / self.update.total_bytes as f32)
+								.clamp(0., 1.)
+						} else {
+							0.
+						};
+						ui.add(
+							egui::ProgressBar::new(fraction)
+								.show_percentage()
+								.desired_width(440.),
+						);
 						ui.label(format!(
-							"3printer {} is available (you have {}).",
-							release.version,
-							updater::CURRENT_VERSION
-						));
-						ui.label(format!(
-							"Download for {}: {}",
-							updater::platform_name(),
-							release.asset_name
+							"{:.1} / {:.1} MB · {}",
+							self.update.downloaded_bytes as f64 / 1_000_000.,
+							self.update.total_bytes as f64 / 1_000_000.,
+							if self.update.downloaded.is_some() {
+								"SHA-256 verified"
+							} else if self.update.paused {
+								"Paused"
+							} else {
+								"Downloading"
+							}
 						));
 					}
-					if self.update.downloading {
-						ui.label("Downloading in the background…");
-					} else if self.update.downloaded.is_some() {
-						ui.label("The update is ready. Restart 3printer to install it.");
+					if self.update.checking {
+						ui.label("Checking GitHub for updates…");
 					}
+					if self.update.checked && self.update.latest.is_none() && self.update.error.is_none() {
+						ui.label("You have the latest version.");
+					}
+					if let Some(error) = &self.update.error {
+						ui.colored_label(Color32::LIGHT_RED, error);
+					}
+					if !self.update_message.is_empty() {
+						ui.label(&self.update_message);
+					}
+					ui.add_space(8.);
 					ui.horizontal(|ui| {
-						if ui.button("Cancel").clicked() {
+						if ui.button("Close").clicked() {
 							cancel = true;
+						}
+						if self.update.downloading && ui.button("Pause").clicked() {
+							pause = true;
 						}
 						if ui
 							.add_enabled(
-								!self.update.downloading,
+								self.update.latest.is_some()
+									&& !self.update.downloading && !self.update.checking,
 								egui::Button::new(if self.update.downloaded.is_some() {
-									"Update now"
+									"Install and relaunch"
+								} else if self.update.paused {
+									"Continue download"
 								} else {
-									"Download and update"
+									"Download update"
 								}),
 							)
 							.clicked()
@@ -2449,14 +2479,23 @@ impl eframe::App for Studio {
 								download = true;
 							}
 						}
+						if self.update.latest.is_none()
+							&& !self.update.checking
+							&& ui.button("Check now").clicked()
+						{
+							self.update.start_check();
+						}
 					});
 				});
 			if cancel {
 				open = false;
 			}
 			self.show_update_prompt = open;
+			if pause {
+				self.update.pause_download();
+			}
 			if download {
-				self.update_after_download = true;
+				self.update_message.clear();
 				self.update.start_download();
 			}
 			if install {
