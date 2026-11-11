@@ -2300,14 +2300,14 @@ impl eframe::App for Studio {
 				ui.horizontal(|ui| {
 					if ui.button("Report bug").clicked() {
 						if let Err(error) = open_github_issue(
-							"https://github.com/rastislavcore/3printer/issues/new?template=bug_report.yml",
+							"https://github.com/neutrononl/3printer/issues/new?template=bug_report.yml",
 						) {
 							self.status = error;
 						}
 					}
 					if ui.button("Request feature").clicked() {
 						if let Err(error) = open_github_issue(
-							"https://github.com/rastislavcore/3printer/issues/new?template=feature_request.yml",
+							"https://github.com/neutrononl/3printer/issues/new?template=feature_request.yml",
 						) {
 							self.status = error;
 						}

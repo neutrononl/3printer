@@ -7,7 +7,7 @@ use std::{
 	thread,
 };
 
-const REPOSITORY: &str = "rastislavcore/3printer";
+const REPOSITORY: &str = "neutrononl/3printer";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug)]

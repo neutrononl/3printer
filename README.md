@@ -83,6 +83,11 @@ cargo fmt --all -- --check
 cargo test --all-targets
 ```
 
+## Feedback
+
+[Report a bug](https://github.com/neutrononl/3printer/issues/new?template=bug_report.yml)
+or [request a feature](https://github.com/neutrononl/3printer/issues/new?template=feature_request.yml).
+
 ## License
 
 3printer is distributed under the CORE License.
