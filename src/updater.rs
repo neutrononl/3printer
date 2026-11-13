@@ -1,5 +1,5 @@
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::{
 	path::{Path, PathBuf},
 	process::{Child, Command},
@@ -66,8 +66,12 @@ impl UpdateState {
 		if self.checking || self.downloading || self.paused || self.downloaded.is_some() {
 			return;
 		}
+		if let Some(path) = self.download_path.take() {
+			let _ = std::fs::remove_file(path);
+		}
 		self.checking = true;
 		self.checked = false;
+		self.latest = None;
 		self.error = None;
 		let (tx, rx) = mpsc::channel();
 		self.check_rx = Some(rx);
@@ -91,9 +95,10 @@ impl UpdateState {
 				release.asset_name
 			))
 		});
-		let existing = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+		let mut existing = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 		if existing > release.size {
 			let _ = std::fs::remove_file(&path);
+			existing = 0;
 		}
 		let mut command = Command::new("curl");
 		command
@@ -118,6 +123,7 @@ impl UpdateState {
 			Ok(child) => {
 				self.download_child = Some(child);
 				self.download_path = Some(path);
+				self.downloaded_bytes = existing;
 				self.total_bytes = release.size;
 				self.downloading = true;
 				self.paused = false;
@@ -134,6 +140,28 @@ impl UpdateState {
 			self.paused = true;
 			self.refresh_progress();
 		}
+	}
+
+	pub fn stop_download(&mut self) {
+		if let Some(mut child) = self.download_child.take() {
+			let _ = child.kill();
+			let _ = child.wait();
+		}
+		if let Some(path) = self.download_path.take() {
+			let _ = std::fs::remove_file(path);
+		}
+		if let Some(path) = self.downloaded.take() {
+			let _ = std::fs::remove_file(path);
+		}
+		self.downloading = false;
+		self.paused = false;
+		self.downloaded_bytes = 0;
+		self.total_bytes = 0;
+		self.error = None;
+	}
+
+	pub fn has_partial_download(&self) -> bool {
+		self.download_path.as_ref().is_some_and(|path| path.exists())
 	}
 
 	fn refresh_progress(&mut self) {
@@ -223,6 +251,12 @@ impl UpdateState {
 	}
 }
 
+impl Drop for UpdateState {
+	fn drop(&mut self) {
+		self.stop_download();
+	}
+}
+
 pub fn load_auto_check() -> bool {
 	std::fs::read(prefs_path())
 		.ok()
@@ -277,20 +311,14 @@ fn check_latest() -> Result<Option<ReleaseInfo>, String> {
 	if compare_versions(version, CURRENT_VERSION) != std::cmp::Ordering::Greater {
 		return Ok(None);
 	}
-	let suffix = platform_asset_suffix();
+	let suffix = platform_asset_suffix()?;
+	let expected_name = format!("3printer-{tag}{suffix}");
 	let assets = value
 		.get("assets")
 		.and_then(serde_json::Value::as_array)
 		.ok_or("GitHub release has no assets")?;
-	let asset = assets
-		.iter()
-		.find(|asset| {
-			asset
-				.get("name")
-				.and_then(serde_json::Value::as_str)
-				.is_some_and(|name| name.ends_with(suffix))
-		})
-		.ok_or_else(|| format!("No {suffix} download is available for this system"))?;
+	let asset = find_asset(assets, &expected_name)
+		.ok_or_else(|| format!("No {expected_name} download is available for this system"))?;
 	Ok(Some(ReleaseInfo {
 		version: version.into(),
 		asset_name: asset
@@ -309,6 +337,12 @@ fn check_latest() -> Result<Option<ReleaseInfo>, String> {
 			.and_then(serde_json::Value::as_u64)
 			.ok_or("GitHub asset has no size")?,
 	}))
+}
+
+fn find_asset<'a>(assets: &'a [serde_json::Value], expected_name: &str) -> Option<&'a serde_json::Value> {
+	assets
+		.iter()
+		.find(|asset| asset.get("name").and_then(serde_json::Value::as_str) == Some(expected_name))
 }
 
 fn parse_github_digest(digest: Option<&str>) -> Result<String, String> {
@@ -344,13 +378,19 @@ fn verify_download(path: &Path, release: &ReleaseInfo) -> Result<(), String> {
 	Ok(())
 }
 
-fn platform_asset_suffix() -> &'static str {
-	if cfg!(target_os = "macos") {
-		"-macos.zip"
-	} else if cfg!(target_os = "windows") {
-		"-windows.zip"
-	} else {
-		"-linux.tar.gz"
+fn platform_asset_suffix() -> Result<&'static str, String> {
+	platform_asset_suffix_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn platform_asset_suffix_for(os: &str, arch: &str) -> Result<&'static str, String> {
+	match (os, arch) {
+		("macos", "aarch64") => Ok("-macos-arm64.zip"),
+		("macos", "x86_64") => Ok("-macos-x86_64.zip"),
+		("linux", "aarch64") => Ok("-linux-arm64.tar.gz"),
+		("linux", "x86_64") => Ok("-linux-x86_64.tar.gz"),
+		("windows", "aarch64") => Ok("-windows-arm64.zip"),
+		("windows", "x86_64") => Ok("-windows-x86_64.zip"),
+		(os, arch) => Err(format!("Updates are not available for {os}/{arch}")),
 	}
 }
 
@@ -422,8 +462,53 @@ fn install_and_restart(archive: &Path) -> Result<(), String> {
 	if !replacement.exists() {
 		return Err("Update archive does not contain the application".into());
 	}
+	let binary = if cfg!(target_os = "macos") {
+		replacement.join("Contents/MacOS/3printer")
+	} else {
+		replacement.clone()
+	};
+	verify_binary_architecture(&binary)?;
 	spawn_restart_helper(&current, &replacement)?;
 	Ok(())
+}
+
+fn verify_binary_architecture(path: &Path) -> Result<(), String> {
+	let mut file =
+		std::fs::File::open(path).map_err(|error| format!("Could not inspect update binary: {error}"))?;
+	let mut header = [0u8; 64];
+	file.read_exact(&mut header)
+		.map_err(|error| format!("Could not read update binary: {error}"))?;
+	let valid = match (std::env::consts::OS, std::env::consts::ARCH) {
+		("macos", arch) => {
+			let cpu = u32::from_le_bytes(header[4..8].try_into().unwrap());
+			header[..4] == [0xcf, 0xfa, 0xed, 0xfe]
+				&& cpu == if arch == "aarch64" { 0x0100000c } else { 0x01000007 }
+		}
+		("linux", arch) => {
+			let machine = u16::from_le_bytes(header[18..20].try_into().unwrap());
+			header[..6] == [0x7f, b'E', b'L', b'F', 2, 1]
+				&& machine == if arch == "aarch64" { 183 } else { 62 }
+		}
+		("windows", arch) => {
+			if &header[..2] != b"MZ" {
+				false
+			} else {
+				let offset = u32::from_le_bytes(header[60..64].try_into().unwrap()) as u64;
+				let mut pe = [0u8; 6];
+				file.seek(SeekFrom::Start(offset)).is_ok()
+					&& file.read_exact(&mut pe).is_ok()
+					&& pe[..4] == *b"PE\0\0"
+					&& u16::from_le_bytes(pe[4..6].try_into().unwrap())
+						== if arch == "aarch64" { 0xaa64 } else { 0x8664 }
+			}
+		}
+		_ => false,
+	};
+	if valid {
+		Ok(())
+	} else {
+		Err("Update binary does not match this system's architecture".into())
+	}
 }
 
 fn find_replacement(staging: &Path) -> Result<PathBuf, String> {
@@ -492,7 +577,8 @@ pub fn platform_name() -> &'static str {
 #[cfg(test)]
 mod tests {
 	use super::{
-		compare_versions, parse_github_digest, verify_download, ReleaseInfo, UpdateEvent, UpdateState,
+		compare_versions, find_asset, parse_github_digest, platform_asset_suffix_for,
+		verify_binary_architecture, verify_download, ReleaseInfo, UpdateEvent, UpdateState,
 	};
 	use sha2::{Digest, Sha256};
 	use std::{
@@ -504,6 +590,56 @@ mod tests {
 	fn versions_are_compared_numerically() {
 		assert!(compare_versions("1.10.0", "1.9.0").is_gt());
 		assert!(compare_versions("v1.2.0", "1.2.0").is_eq());
+	}
+
+	#[test]
+	fn release_assets_match_os_architecture_and_version() {
+		for (os, arch, suffix) in [
+			("macos", "aarch64", "-macos-arm64.zip"),
+			("macos", "x86_64", "-macos-x86_64.zip"),
+			("linux", "aarch64", "-linux-arm64.tar.gz"),
+			("linux", "x86_64", "-linux-x86_64.tar.gz"),
+			("windows", "aarch64", "-windows-arm64.zip"),
+			("windows", "x86_64", "-windows-x86_64.zip"),
+		] {
+			assert_eq!(platform_asset_suffix_for(os, arch).unwrap(), suffix);
+		}
+		assert!(platform_asset_suffix_for("linux", "riscv64").is_err());
+		let assets = serde_json::json!([
+			{"name": "3printer-v0.2.0-macos-arm64.zip"},
+			{"name": "3printer-v0.2.1-macos-x86_64.zip"},
+			{"name": "other-v0.2.1-macos-arm64.zip"},
+			{"name": "3printer-v0.2.1-macos-arm64.zip"}
+		]);
+		let assets = assets.as_array().unwrap();
+		assert_eq!(
+			find_asset(assets, "3printer-v0.2.1-macos-arm64.zip")
+				.unwrap()
+				.get("name")
+				.unwrap(),
+			"3printer-v0.2.1-macos-arm64.zip"
+		);
+		assert!(find_asset(assets, "3printer-v0.2.1-linux-arm64.tar.gz").is_none());
+	}
+
+	#[test]
+	fn update_binary_must_match_the_running_architecture() {
+		let current = std::env::current_exe().unwrap();
+		assert!(verify_binary_architecture(&current).is_ok());
+		let path = std::env::temp_dir().join(format!("3printer-arch-test-{}", std::process::id()));
+		let mut wrong = fs::read(&current).unwrap();
+		match std::env::consts::OS {
+			"macos" => wrong[4..8].copy_from_slice(&0x0100000fu32.to_le_bytes()),
+			"linux" => wrong[18..20].copy_from_slice(&0xffffu16.to_le_bytes()),
+			"windows" => {
+				let offset = u32::from_le_bytes(wrong[60..64].try_into().unwrap()) as usize;
+				wrong[offset + 4..offset + 6].copy_from_slice(&0xffffu16.to_le_bytes());
+			}
+			_ => return,
+		}
+		fs::write(&path, wrong).unwrap();
+		assert!(verify_binary_architecture(&path).is_err());
+		fs::remove_file(path).unwrap();
 	}
 
 	#[test]
@@ -554,7 +690,7 @@ mod tests {
 				assert!(
 					matches!(event, UpdateEvent::Downloaded),
 					"{}",
-					state.error.unwrap_or_default()
+					state.error.as_deref().unwrap_or_default()
 				);
 				break;
 			}
@@ -562,7 +698,25 @@ mod tests {
 			std::thread::sleep(Duration::from_millis(10));
 		}
 		assert_eq!(state.downloaded_bytes, contents.len() as u64);
-		fs::remove_file(state.downloaded.unwrap()).unwrap();
+		let downloaded = state.downloaded.clone().unwrap();
+		state.stop_download();
+		assert!(!downloaded.exists());
+		assert!(state.downloaded.is_none());
+		assert_eq!(state.downloaded_bytes, 0);
 		fs::remove_file(source).unwrap();
+	}
+
+	#[test]
+	fn stop_removes_a_paused_partial_download() {
+		let path = std::env::temp_dir().join(format!("3printer-partial-{}", std::process::id()));
+		fs::write(&path, b"partial archive").unwrap();
+		let mut state = UpdateState::new(false);
+		state.download_path = Some(path.clone());
+		state.paused = true;
+		state.downloaded_bytes = 15;
+		state.stop_download();
+		assert!(!path.exists());
+		assert!(!state.paused);
+		assert_eq!(state.downloaded_bytes, 0);
 	}
 }

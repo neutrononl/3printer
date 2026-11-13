@@ -73,8 +73,11 @@ On Windows, run PowerShell from the project directory:
 This creates `dist\3printer-windows\3printer.exe`. The Windows build uses the
 GUI subsystem, so double-clicking it does not open a console window.
 
-GitHub Actions builds all three packages automatically when a non-prerelease
-GitHub Release is published, and attaches the archives to that Release.
+GitHub Actions builds macOS, Linux, and Windows packages for both ARM64 and
+x86-64 when a non-prerelease GitHub Release is published. Assets are named
+`3printer-<tag>-<os>-<arch>.zip` (macOS and Windows) or
+`3printer-<tag>-linux-<arch>.tar.gz`. The updater selects the package matching
+the running system and verifies its architecture before installation.
 
 ## Test
 

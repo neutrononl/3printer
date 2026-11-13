@@ -11,8 +11,89 @@ use geometry::*;
 use std::process::Command;
 const BLUE: Color32 = Color32::from_rgb(30, 159, 215);
 const BUTTON_BLUE: Color32 = Color32::from_rgb(18, 94, 145);
+const INPUT_FILL: Color32 = Color32::from_rgb(27, 31, 37);
 const MUTED: Color32 = Color32::from_rgb(156, 165, 178);
 const TITLE: Color32 = Color32::from_rgb(225, 228, 235);
+
+fn modal_frame(ctx: &egui::Context) -> egui::Frame {
+	egui::Frame::window(&ctx.style())
+		.inner_margin(egui::Margin::symmetric(20, 18))
+		.corner_radius(12)
+		.fill(Color32::from_rgb(43, 48, 57))
+		.stroke(Stroke::new(1., Color32::from_rgb(75, 83, 96)))
+}
+
+fn modal_header(ui: &mut egui::Ui, title: &str, description: &str) {
+	ui.label(RichText::new(title).size(21.).strong().color(TITLE));
+	ui.label(RichText::new(description).size(13.).color(MUTED));
+	ui.add_space(6.);
+	ui.separator();
+	ui.add_space(4.);
+}
+
+fn modal_button(label: &'static str) -> egui::Button<'static> {
+	egui::Button::new(RichText::new(label).size(14.))
+		.min_size(Vec2::new(116., 40.))
+		.corner_radius(7)
+}
+
+fn modal_primary_button(label: &'static str) -> egui::Button<'static> {
+	modal_button(label).fill(BUTTON_BLUE)
+}
+
+fn centered_sized_button(
+	ui: &mut egui::Ui,
+	size: impl Into<Vec2>,
+	button: egui::Button<'_>,
+) -> egui::Response {
+	let size = size.into();
+	ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+		ui.add_sized(size, button)
+	})
+	.inner
+}
+
+fn centered_full_width_button(ui: &mut egui::Ui, height: f32, button: egui::Button<'_>) -> egui::Response {
+	let width = ui.available_width();
+	centered_sized_button(ui, [width, height], button)
+}
+
+pub(crate) fn input_field<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+	ui.scope(|ui| {
+		let border = ui.visuals().widgets.inactive.bg_fill;
+		let visuals = ui.visuals_mut();
+		visuals.extreme_bg_color = INPUT_FILL;
+		for widget in [
+			&mut visuals.widgets.inactive,
+			&mut visuals.widgets.hovered,
+			&mut visuals.widgets.active,
+		] {
+			widget.weak_bg_fill = INPUT_FILL;
+			widget.bg_fill = INPUT_FILL;
+			widget.bg_stroke = Stroke::new(1., border);
+			widget.expansion = 0.;
+		}
+		add(ui)
+	})
+	.inner
+}
+
+fn configuration_row(
+	ui: &mut egui::Ui,
+	label: &str,
+	description: &str,
+	add_input: impl FnOnce(&mut egui::Ui),
+) {
+	ui.columns(2, |columns| {
+		columns[0].set_min_height(46.);
+		columns[0].spacing_mut().item_spacing.y = 2.;
+		columns[0].label(RichText::new(label).color(TITLE));
+		columns[0].label(RichText::new(description).size(12.).color(MUTED));
+		columns[1].set_min_height(46.);
+		columns[1].add_space(8.);
+		add_input(&mut columns[1]);
+	});
+}
 
 fn open_github_issue(url: &str) -> Result<(), String> {
 	#[cfg(target_os = "macos")]
@@ -88,7 +169,6 @@ struct Studio {
 	preview: bool,
 	show_settings: bool,
 	show_help: bool,
-	show_updates: bool,
 	show_license: bool,
 	status: String,
 	yaw: f32,
@@ -115,6 +195,7 @@ impl Studio {
 		style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
 		style.visuals.panel_fill = Color32::from_rgb(40, 43, 49);
 		style.visuals.window_fill = Color32::from_rgb(47, 51, 58);
+		style.visuals.extreme_bg_color = INPUT_FILL;
 		style.visuals.selection.bg_fill = BUTTON_BLUE;
 		style.visuals.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
 		// Selected buttons inherit the current interaction state's text color.
@@ -177,7 +258,6 @@ impl Studio {
 			preview: false,
 			show_settings: false,
 			show_help: false,
-			show_updates: false,
 			show_license: false,
 			status: "Ready · Import a model to begin".into(),
 			yaw: -0.65,
@@ -255,41 +335,49 @@ impl Studio {
 		let mut close = false;
 		egui::Window::new("Manage printers")
 			.open(&mut open)
-			.default_width(720.)
-			.min_width(660.)
+			.frame(modal_frame(ctx))
+			.default_width(760.)
+			.min_width(700.)
 			.collapsible(false)
 			.show(ctx, |ui| {
-				ui.horizontal(|ui| {
-					egui::ComboBox::from_id_salt("manage-printer")
-						.selected_text(&self.printer_draft.name)
-						.show_ui(ui, |ui| {
-							for i in 0..self.printers.len() {
-								if ui
-									.selectable_label(self.printer_index == Some(i), &self.printers[i].name)
-									.clicked()
-								{
-									self.printer_index = Some(i);
-									self.printer_draft = self.printers[i].clone();
+				modal_header(
+					ui,
+					"Printer profiles",
+					"Choose a printer or edit its machine settings and G-code.",
+				);
+				ui.horizontal_wrapped(|ui| {
+					input_field(ui, |ui| {
+						egui::ComboBox::from_id_salt("manage-printer")
+							.selected_text(&self.printer_draft.name)
+							.show_ui(ui, |ui| {
+								for i in 0..self.printers.len() {
+									if ui
+										.selectable_label(
+											self.printer_index == Some(i),
+											&self.printers[i].name,
+										)
+										.clicked()
+									{
+										self.printer_index = Some(i);
+										self.printer_draft = self.printers[i].clone();
+									}
 								}
-							}
-						});
-					if ui.button("Add printer").clicked() {
+							})
+					});
+					if ui.add(modal_button("Add printer")).clicked() {
 						self.printer_index = None;
 						self.printer_draft = printer::Printer::default();
 						self.printer_draft.name = "New printer".into();
 					}
 					if ui
-						.button("Import…")
+						.add(modal_button("Import…"))
 						.on_hover_text("Load a printer profile from JSON")
 						.clicked()
 					{
 						self.import_printer();
 					}
 					if ui
-						.add_enabled(
-							self.printer_draft.validate().is_ok(),
-							egui::Button::new("Export…"),
-						)
+						.add_enabled(self.printer_draft.validate().is_ok(), modal_button("Export…"))
 						.on_hover_text("Export the current profile and edits as JSON")
 						.clicked()
 					{
@@ -300,18 +388,28 @@ impl Studio {
 					ui.label(RichText::new(&self.printer_message).small());
 				}
 				ui.add_space(8.);
-				ui.horizontal(|ui| {
+				ui.horizontal_wrapped(|ui| {
 					for (i, label) in ["Basic parameters", "Machine G-code", "Extruder 1"]
 						.iter()
 						.enumerate()
 					{
-						ui.selectable_value(&mut self.printer_tab, i, *label);
+						if ui
+							.add_sized(
+								[150., 40.],
+								egui::Button::new(*label)
+									.selected(self.printer_tab == i)
+									.corner_radius(7),
+							)
+							.clicked()
+						{
+							self.printer_tab = i;
+						}
 					}
 				});
 				ui.separator();
 				egui::ScrollArea::vertical()
 					.id_salt("printer-content")
-					.max_height(470.)
+					.max_height((ctx.available_rect().height() - 370.).clamp(220., 420.))
 					.show(ui, |ui| {
 						ui.set_min_height(350.);
 						printer_ui::content(ui, &mut self.printer_draft, self.printer_tab);
@@ -321,13 +419,9 @@ impl Studio {
 				if let Err(e) = &valid {
 					ui.colored_label(Color32::LIGHT_RED, e);
 				}
-				ui.horizontal(|ui| {
+				ui.horizontal_wrapped(|ui| {
 					if ui
-						.add_enabled(
-							valid.is_ok(),
-							egui::Button::new(RichText::new("Save and select").color(Color32::WHITE))
-								.fill(BUTTON_BLUE),
-						)
+						.add_enabled(valid.is_ok(), modal_primary_button("Save and select"))
 						.clicked()
 					{
 						if let Some(i) = self.printer_index {
@@ -345,7 +439,7 @@ impl Studio {
 					if ui
 						.add_enabled(
 							self.printer_index.is_some() && self.printers.len() > 1,
-							egui::Button::new("Remove printer"),
+							modal_button("Remove printer"),
 						)
 						.clicked()
 					{
@@ -360,13 +454,13 @@ impl Studio {
 						self.save_printers();
 					}
 					if ui
-						.button("Reset")
+						.add(modal_button("Reset"))
 						.on_hover_text("Restore Ender 5 defaults in this draft")
 						.clicked()
 					{
 						self.printer_draft = printer::Printer::default();
 					}
-					if ui.button("Cancel").clicked() {
+					if ui.add(modal_button("Cancel")).clicked() {
 						close = true;
 					}
 				});
@@ -807,6 +901,7 @@ impl Studio {
 			menus::Action::License => self.show_license = true,
 			menus::Action::Updates => {
 				self.show_update_prompt = true;
+				self.update_message.clear();
 				self.update.start_check();
 			}
 		}
@@ -844,13 +939,8 @@ impl Studio {
 						let name = self.settings.printer.name.clone();
 						ui.menu_button(format!("Printer: {name}"), |ui| {
 							for i in 0..self.printers.len() {
-								if ui
-									.selectable_label(
-										self.settings.printer == self.printers[i],
-										&self.printers[i].name,
-									)
-									.clicked()
-								{
+								let selected = self.settings.printer == self.printers[i];
+								if icons::printer_menu_item(ui, &self.printers[i].name, selected).clicked() {
 									self.settings.printer = self.printers[i].clone();
 									self.settings.nozzle = self.settings.printer.nozzle;
 									self.invalidate();
@@ -858,7 +948,7 @@ impl Studio {
 								}
 							}
 							ui.separator();
-							if ui.button("Manage printers").clicked() {
+							if icons::menu_item(ui, "settings", "Manage printers", "").clicked() {
 								self.printer_draft = self.settings.printer.clone();
 								self.printer_index =
 									self.printers.iter().position(|p| p == &self.settings.printer);
@@ -918,40 +1008,35 @@ impl Studio {
 							.color(MUTED)
 							.small(),
 					);
-					if ui
-						.add_sized(
-							[ui.available_width(), 38.],
-							egui::Button::new(RichText::new("Export G-code").color(Color32::WHITE))
-								.fill(BUTTON_BLUE),
-						)
-						.clicked()
+					if centered_full_width_button(
+						ui,
+						38.,
+						egui::Button::new(RichText::new("Export G-code").color(Color32::WHITE))
+							.fill(BUTTON_BLUE),
+					)
+					.clicked()
 					{
 						self.export();
 					}
-					if ui
-						.add_sized(
-							[ui.available_width(), 38.],
-							egui::Button::new("Back to preparation"),
-						)
-						.clicked()
+					if centered_full_width_button(ui, 38., egui::Button::new("Back to preparation")).clicked()
 					{
 						self.preview = false;
 						self.playing = false;
 					}
-				} else if ui
-					.add_sized(
-						[ui.available_width(), 38.],
-						egui::Button::new(
-							RichText::new(if self.slicing.is_some() {
-								"Slicing…"
-							} else {
-								"Start slicing"
-							})
-							.color(Color32::WHITE),
-						)
-						.fill(BUTTON_BLUE),
+				} else if centered_full_width_button(
+					ui,
+					38.,
+					egui::Button::new(
+						RichText::new(if self.slicing.is_some() {
+							"Slicing…"
+						} else {
+							"Start slicing"
+						})
+						.color(Color32::WHITE),
 					)
-					.clicked()
+					.fill(BUTTON_BLUE),
+				)
+				.clicked()
 				{
 					self.start_slice();
 				}
@@ -972,13 +1057,11 @@ impl Studio {
 						if self.tool == Tool::Scale {
 							self.capture_scale();
 						}
-						let previous = self.models[i].clone();
-						let before = (
-							self.models[i].position,
-							self.models[i].rotation,
-							self.models[i].scale,
-						);
-						let m = &mut self.models[i];
+						let m = &self.models[i];
+						let mut position = m.position;
+						let mut rotation = m.rotation;
+						let mut model_scale = m.scale;
+						let mut resize = Vec::new();
 						match self.tool {
 							Tool::Scale => {
 								ui.checkbox(&mut self.uniform, "Uniform scale");
@@ -987,31 +1070,33 @@ impl Studio {
 									ui.horizontal(|ui| {
 										ui.add_sized([24., 30.], egui::Label::new(["X", "Y", "Z"][a]));
 										let mut size = hi[a] - lo[a];
-										if ui
-											.add_sized(
+										if input_field(ui, |ui| {
+											ui.add_sized(
 												field_size,
 												egui::DragValue::new(&mut size)
 													.range(0.01..=200.)
 													.suffix(" mm"),
 											)
-											.changed()
+										})
+										.changed()
 										{
-											m.resize_axis(a, size / (hi[a] - lo[a]).max(0.001), self.uniform);
+											resize.push((a, size / (hi[a] - lo[a]).max(0.001)));
 										}
 									});
 								}
-								let mut percent = m.scale * 100.;
-								if ui
-									.add_sized(
+								let mut percent = model_scale * 100.;
+								if input_field(ui, |ui| {
+									ui.add_sized(
 										field_size,
 										egui::DragValue::new(&mut percent)
 											.range(1.0..=500.)
 											.prefix("Scale ")
 											.suffix(" %"),
 									)
-									.changed()
+								})
+								.changed()
 								{
-									m.scale = percent / 100.;
+									model_scale = percent / 100.;
 								}
 							}
 							Tool::Rotate => {
@@ -1025,14 +1110,16 @@ impl Studio {
 									ui.horizontal(|ui| {
 										ui.add_sized([24., 30.], egui::Label::new(*label));
 										if ui.add_sized([44., 30.], egui::Button::new("−45°")).clicked() {
-											m.rotation[a] -= 45.;
+											rotation[a] -= 45.;
 										}
-										ui.add_sized(
-											[104., 30.],
-											egui::DragValue::new(&mut m.rotation[a]).speed(1.).suffix("°"),
-										);
+										input_field(ui, |ui| {
+											ui.add_sized(
+												[104., 30.],
+												egui::DragValue::new(&mut rotation[a]).speed(1.).suffix("°"),
+											)
+										});
 										if ui.add_sized([44., 30.], egui::Button::new("+45°")).clicked() {
-											m.rotation[a] += 45.;
+											rotation[a] += 45.;
 										}
 									});
 								}
@@ -1041,18 +1128,32 @@ impl Studio {
 								for (a, label) in ["X", "Y", "Z"].iter().enumerate() {
 									ui.horizontal(|ui| {
 										ui.add_sized([24., 30.], egui::Label::new(*label));
-										ui.add_sized(
-											field_size,
-											egui::DragValue::new(&mut m.position[a])
-												.speed(0.5)
-												.max_decimals(1)
-												.suffix(" mm"),
-										);
+										input_field(ui, |ui| {
+											ui.add_sized(
+												field_size,
+												egui::DragValue::new(&mut position[a])
+													.speed(0.5)
+													.max_decimals(1)
+													.suffix(" mm"),
+											)
+										});
 									});
 								}
 							}
 						}
-						if before != (m.position, m.rotation, m.scale) || previous.triangles != m.triangles {
+						if position != m.position
+							|| rotation != m.rotation
+							|| model_scale != m.scale
+							|| !resize.is_empty()
+						{
+							let previous = m.clone();
+							let m = &mut self.models[i];
+							m.position = position;
+							m.rotation = rotation;
+							m.scale = model_scale;
+							for (axis, factor) in resize {
+								m.resize_axis(axis, factor, self.uniform);
+							}
 							if self.tool == Tool::Rotate || self.tool == Tool::Scale {
 								m.keep_center(previous.center());
 							}
@@ -1166,14 +1267,14 @@ impl Studio {
 							egui::ScrollArea::vertical().max_height(135.).show(ui, |ui| {
 								for i in 0..self.models.len() {
 									let m = &self.models[i];
-									if ui
-										.add_sized(
-											[ui.available_width(), 32.],
-											egui::Button::new(&m.name)
-												.selected(self.is_selected(i))
-												.truncate(),
-										)
-										.clicked()
+									if centered_full_width_button(
+										ui,
+										32.,
+										egui::Button::new(&m.name)
+											.selected(self.is_selected(i))
+											.truncate(),
+									)
+									.clicked()
 									{
 										self.select_model(
 											Some(i),
@@ -1200,10 +1301,12 @@ impl Studio {
 					ui.horizontal(|ui| {
 						ui.label("Number of copies");
 						ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-							ui.add_sized(
-								action_size,
-								egui::DragValue::new(&mut self.clone_count).range(1..=1000),
-							);
+							input_field(ui, |ui| {
+								ui.add_sized(
+									action_size,
+									egui::DragValue::new(&mut self.clone_count).range(1..=1000),
+								)
+							});
 						});
 					});
 					ui.horizontal(|ui| {
@@ -1259,17 +1362,17 @@ impl Studio {
 						.iter()
 						.enumerate()
 					{
-						if ui
-							.add_sized(
-								[ui.available_width(), 36.],
-								egui::Button::new(format!(
-									"{}    ·    {} mm",
-									label,
-									["0.10", "0.15", "0.20"][i]
-								))
-								.selected(self.profile == i),
-							)
-							.clicked()
+						if centered_full_width_button(
+							ui,
+							36.,
+							egui::Button::new(format!(
+								"{}    ·    {} mm",
+								label,
+								["0.10", "0.15", "0.20"][i]
+							))
+							.selected(self.profile == i),
+						)
+						.clicked()
 						{
 							self.profile = i;
 							self.settings.height = [0.1, 0.15, 0.2][i];
@@ -1284,35 +1387,37 @@ impl Studio {
 							.small()
 							.color(MUTED),
 					);
-					egui::ComboBox::from_id_salt("material")
-						.selected_text(&self.settings.material)
-						.width(panel_width)
-						.show_ui(ui, |ui| {
-							for (name, temperature, bed, fan, speed) in [
-								("PLA", 200., 50., 100., 50.),
-								("PETG", 235., 80., 40., 40.),
-								("ABS", 250., 100., 0., 45.),
-								("TPU", 220., 50., 30., 25.),
-							] {
-								if ui
-									.selectable_label(self.settings.material == name, name)
-									.clicked()
-								{
-									self.settings.material = name.into();
-									self.settings.density = match name {
-										"PETG" => 1.27,
-										"ABS" => 1.04,
-										"TPU" => 1.21,
-										_ => 1.24,
-									};
-									self.settings.temperature = temperature;
-									self.settings.bed = bed;
-									self.settings.fan = fan;
-									self.settings.speed = speed;
-									self.invalidate();
+					input_field(ui, |ui| {
+						egui::ComboBox::from_id_salt("material")
+							.selected_text(&self.settings.material)
+							.width(panel_width)
+							.show_ui(ui, |ui| {
+								for (name, temperature, bed, fan, speed) in [
+									("PLA", 200., 50., 100., 50.),
+									("PETG", 235., 80., 40., 40.),
+									("ABS", 250., 100., 0., 45.),
+									("TPU", 220., 50., 30., 25.),
+								] {
+									if ui
+										.selectable_label(self.settings.material == name, name)
+										.clicked()
+									{
+										self.settings.material = name.into();
+										self.settings.density = match name {
+											"PETG" => 1.27,
+											"ABS" => 1.04,
+											"TPU" => 1.21,
+											_ => 1.24,
+										};
+										self.settings.temperature = temperature;
+										self.settings.bed = bed;
+										self.settings.fan = fan;
+										self.settings.speed = speed;
+										self.invalidate();
+									}
 								}
-							}
-						});
+							})
+					});
 					ui.horizontal(|ui| {
 						ui.label(RichText::new("Layer height").color(MUTED));
 						ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1325,29 +1430,28 @@ impl Studio {
 							ui.label(format!("{:.0}%", self.settings.infill));
 						});
 					});
-					if ui
-						.add_sized(
-							[ui.available_width(), 36.],
-							egui::Button::new("Edit configuration"),
-						)
-						.clicked()
+					if centered_full_width_button(ui, 36., egui::Button::new("Edit configuration")).clicked()
 					{
 						self.show_settings = true;
 					}
 					ui.collapsing("Supports", |ui| {
-						ui.add_sized(
-							[120., 24.],
-							egui::DragValue::new(&mut self.support_grid)
-								.range(2.0..=20.)
-								.prefix("Grid ")
-								.suffix(" mm"),
-						);
-						ui.add(
-							egui::DragValue::new(&mut self.support_angle)
-								.range(10.0..=85.)
-								.prefix("Max angle ")
-								.suffix("°"),
-						);
+						input_field(ui, |ui| {
+							ui.add_sized(
+								[120., 24.],
+								egui::DragValue::new(&mut self.support_grid)
+									.range(2.0..=20.)
+									.prefix("Grid ")
+									.suffix(" mm"),
+							)
+						});
+						input_field(ui, |ui| {
+							ui.add(
+								egui::DragValue::new(&mut self.support_angle)
+									.range(10.0..=85.)
+									.prefix("Max angle ")
+									.suffix("°"),
+							)
+						});
 						if ui
 							.add_enabled(self.selected.is_some(), egui::Button::new("Automatic Support"))
 							.clicked()
@@ -1369,7 +1473,8 @@ impl Studio {
 								);
 								self.checkpoint();
 								self.models.push(support);
-								self.selected = Some(self.models.len() - 1);
+								self.select_model(Some(self.models.len() - 1), false);
+								self.scale_original.clear();
 								self.tool = Tool::Move;
 							}
 						}
@@ -1693,6 +1798,10 @@ impl Studio {
 						}
 					}
 					faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+					let selected: Vec<_> = (0..self.models.len()).map(|i| self.is_selected(i)).collect();
+					let mut mesh = egui::Mesh::default();
+					mesh.vertices.reserve(faces.len() * 3);
+					mesh.indices.reserve(faces.len() * 3);
 					for (_, i, tri) in faces {
 						let a = tri[0];
 						let b = tri[1];
@@ -1706,16 +1815,18 @@ impl Studio {
 						);
 						// Explicit triangles avoid convex-path stroke/AA extrusion on thin faces.
 						// Mesh rendering accepts either winding and preserves every imported face.
-						let mut mesh = egui::Mesh::default();
-						let color = if self.is_selected(i) {
+						let color = if selected[i] {
 							color.gamma_multiply(1.12)
 						} else {
 							color
 						};
+						let first = mesh.vertices.len() as u32;
 						for pos in tri.map(project) {
 							mesh.colored_vertex(pos, color);
 						}
-						mesh.add_triangle(0, 1, 2);
+						mesh.add_triangle(first, first + 1, first + 2);
+					}
+					if !mesh.is_empty() {
 						painter.add(egui::Shape::mesh(mesh));
 					}
 				}
@@ -1854,11 +1965,13 @@ impl Studio {
 										self.playing = !self.playing;
 										self.play_clock = ctx.input(|i| i.time);
 									}
-									ui.add(
-										egui::DragValue::new(&mut self.play_speed)
-											.range(1.0..=2000.)
-											.suffix(" paths/s"),
-									);
+									input_field(ui, |ui| {
+										ui.add(
+											egui::DragValue::new(&mut self.play_speed)
+												.range(1.0..=2000.)
+												.suffix(" paths/s"),
+										)
+									});
 									ui.label("Layer");
 									if ui
 										.add(egui::Slider::new(&mut self.layer, 1..=self.layers.len()))
@@ -1886,20 +1999,19 @@ impl eframe::App for Studio {
 		if let Some(event) = self.update.poll() {
 			match event {
 				updater::UpdateEvent::Available => {
-					self.update_message = "A newer version is available".into();
+					self.update_message.clear();
 					if self.update.auto_check {
 						self.show_update_prompt = true;
 					}
 				}
-				updater::UpdateEvent::UpToDate => self.update_message = "You have the latest version".into(),
-				updater::UpdateEvent::CheckFailed => {
-					self.update_message = "Could not check for updates".into()
+				updater::UpdateEvent::UpToDate | updater::UpdateEvent::CheckFailed => {
+					self.update_message.clear()
 				}
 				updater::UpdateEvent::Downloaded => {
-					self.update_message = "Download verified. Ready to install.".into();
+					self.update_message.clear();
 					self.show_update_prompt = true;
 				}
-				updater::UpdateEvent::DownloadFailed => self.update_message = "Update download failed".into(),
+				updater::UpdateEvent::DownloadFailed => self.update_message.clear(),
 			}
 		}
 		if self.update.checking || self.update.downloading {
@@ -2000,312 +2112,281 @@ impl eframe::App for Studio {
 		self.canvas(ctx);
 		self.printer_window(ctx);
 		let mut show = self.show_settings;
+		let mut close_settings = false;
 		egui::Window::new("Print configuration")
 			.open(&mut show)
+			.frame(modal_frame(ctx))
 			.resizable(true)
-			.default_width(480.)
+			.default_width(560.)
+			.min_width(500.)
 			.show(ctx, |ui| {
-				egui::ScrollArea::vertical().max_height(560.).show(ui, |ui| {
-					let before = self.settings.clone();
-					ui.label(
-						RichText::new(format!(
-							"{} · {} × {} × {} mm",
-							self.settings.printer.name,
-							self.settings.printer.size[0],
-							self.settings.printer.size[1],
-							self.settings.printer.size[2]
-						))
-						.color(MUTED),
-					);
-					for (title, fields) in [
-						(
-							"Quality & strength",
-							vec![
-								(
-									"Layer height",
-									"Vertical detail and print time.",
-									&mut self.settings.height,
-									0.04..=0.8,
-									" mm",
-								),
-								(
-									"Infill density",
-									"Interior material percentage.",
-									&mut self.settings.infill,
-									0.0..=100.,
-									" %",
-								),
-								(
-									"Nozzle / line width",
-									"Width of each deposited line.",
-									&mut self.settings.nozzle,
-									0.1..=2.,
-									" mm",
-								),
-							],
-						),
-						(
-							"Speed",
-							vec![
-								(
-									"Wall speed",
-									"Speed for outer contours.",
-									&mut self.settings.wall_speed,
-									5.0..=300.,
-									" mm/s",
-								),
-								(
-									"Infill speed",
-									"Speed for interior lines.",
-									&mut self.settings.infill_speed,
-									5.0..=300.,
-									" mm/s",
-								),
-								(
-									"Small feature max length",
-									"Threshold for slowing short paths.",
-									&mut self.settings.small_length,
-									0.0..=100.,
-									" mm",
-								),
-								(
-									"Small feature speed",
-									"Speed multiplier for short paths.",
-									&mut self.settings.small_speed,
-									1.0..=100.,
-									" %",
-								),
-								(
-									"Print speed",
-									"Overall extrusion speed limit.",
-									&mut self.settings.speed,
-									5.0..=300.,
-									" mm/s",
-								),
-								(
-									"Travel speed",
-									"Speed when not extruding.",
-									&mut self.settings.travel_speed,
-									5.0..=300.,
-									" mm/s",
-								),
-							],
-						),
-						(
-							"Material & cooling",
-							vec![
-								(
-									"Material density",
-									"Filament mass used for flow calculations.",
-									&mut self.settings.density,
-									0.1..=10.,
-									" g/cm³",
-								),
-								(
-									"Wall flow",
-									"Extrusion multiplier for walls.",
-									&mut self.settings.wall_flow,
-									0.0..=150.,
-									" %",
-								),
-								(
-									"Infill flow",
-									"Extrusion multiplier for infill.",
-									&mut self.settings.infill_flow,
-									0.0..=150.,
-									" %",
-								),
-								(
-									"Nozzle temperature",
-									"Target hotend temperature.",
-									&mut self.settings.temperature,
-									150.0..=300.,
-									" °C",
-								),
-								(
-									"Bed temperature",
-									"Target build plate temperature.",
-									&mut self.settings.bed,
-									0.0..=120.,
-									" °C",
-								),
-								(
-									"Filament diameter",
-									"Diameter used to calculate extrusion.",
-									&mut self.settings.diameter,
-									0.5..=4.,
-									" mm",
-								),
-								(
-									"Extrusion flow",
-									"Global extrusion multiplier.",
-									&mut self.settings.flow,
-									50.0..=150.,
-									" %",
-								),
-								(
-									"Cooling fan",
-									"Part cooling fan percentage.",
-									&mut self.settings.fan,
-									0.0..=100.,
-									" %",
-								),
-							],
-						),
-					] {
-						ui.separator();
-						ui.strong(title);
-						for (label, description, value, range, unit) in fields {
-							ui.allocate_ui_with_layout(
-								egui::Vec2::new(360., 46.),
-								egui::Layout::left_to_right(egui::Align::Center),
-								|ui| {
-									ui.allocate_ui_with_layout(
-										egui::Vec2::new(210., 46.),
-										egui::Layout::top_down(egui::Align::Min),
-										|ui| {
-											ui.label(RichText::new(label).color(TITLE));
-											ui.label(RichText::new(description).size(12.).color(MUTED));
-										},
-									);
-									ui.allocate_ui_with_layout(
-										egui::Vec2::new(120., 46.),
-										egui::Layout::left_to_right(egui::Align::Center),
-										|ui| {
-											ui.add_sized(
-												[120., 24.],
-												egui::DragValue::new(value)
-													.range(range)
-													.speed(0.1)
-													.suffix(unit),
-											);
-										},
-									);
-								},
-							);
+				modal_header(
+					ui,
+					"Print configuration",
+					"Adjust quality, speed, and material settings for this print.",
+				);
+				egui::ScrollArea::vertical()
+					.max_height((ctx.available_rect().height() - 260.).clamp(240., 560.))
+					.show(ui, |ui| {
+						let before = self.settings.clone();
+						ui.label(
+							RichText::new(format!(
+								"{} · {} × {} × {} mm",
+								self.settings.printer.name,
+								self.settings.printer.size[0],
+								self.settings.printer.size[1],
+								self.settings.printer.size[2]
+							))
+							.color(MUTED),
+						);
+						for (title, fields) in [
+							(
+								"Quality & strength",
+								vec![
+									(
+										"Layer height",
+										"Vertical detail and print time.",
+										&mut self.settings.height,
+										0.04..=0.8,
+										" mm",
+									),
+									(
+										"Infill density",
+										"Interior material percentage.",
+										&mut self.settings.infill,
+										0.0..=100.,
+										" %",
+									),
+									(
+										"Nozzle / line width",
+										"Width of each deposited line.",
+										&mut self.settings.nozzle,
+										0.1..=2.,
+										" mm",
+									),
+								],
+							),
+							(
+								"Speed",
+								vec![
+									(
+										"Wall speed",
+										"Speed for outer contours.",
+										&mut self.settings.wall_speed,
+										5.0..=300.,
+										" mm/s",
+									),
+									(
+										"Infill speed",
+										"Speed for interior lines.",
+										&mut self.settings.infill_speed,
+										5.0..=300.,
+										" mm/s",
+									),
+									(
+										"Small feature max length",
+										"Threshold for slowing short paths.",
+										&mut self.settings.small_length,
+										0.0..=100.,
+										" mm",
+									),
+									(
+										"Small feature speed",
+										"Speed multiplier for short paths.",
+										&mut self.settings.small_speed,
+										1.0..=100.,
+										" %",
+									),
+									(
+										"Print speed",
+										"Overall extrusion speed limit.",
+										&mut self.settings.speed,
+										5.0..=300.,
+										" mm/s",
+									),
+									(
+										"Travel speed",
+										"Speed when not extruding.",
+										&mut self.settings.travel_speed,
+										5.0..=300.,
+										" mm/s",
+									),
+								],
+							),
+							(
+								"Material & cooling",
+								vec![
+									(
+										"Material density",
+										"Filament mass used for flow calculations.",
+										&mut self.settings.density,
+										0.1..=10.,
+										" g/cm³",
+									),
+									(
+										"Wall flow",
+										"Extrusion multiplier for walls.",
+										&mut self.settings.wall_flow,
+										0.0..=150.,
+										" %",
+									),
+									(
+										"Infill flow",
+										"Extrusion multiplier for infill.",
+										&mut self.settings.infill_flow,
+										0.0..=150.,
+										" %",
+									),
+									(
+										"Nozzle temperature",
+										"Target hotend temperature.",
+										&mut self.settings.temperature,
+										150.0..=300.,
+										" °C",
+									),
+									(
+										"Bed temperature",
+										"Target build plate temperature.",
+										&mut self.settings.bed,
+										0.0..=120.,
+										" °C",
+									),
+									(
+										"Filament diameter",
+										"Diameter used to calculate extrusion.",
+										&mut self.settings.diameter,
+										0.5..=4.,
+										" mm",
+									),
+									(
+										"Extrusion flow",
+										"Global extrusion multiplier.",
+										&mut self.settings.flow,
+										50.0..=150.,
+										" %",
+									),
+									(
+										"Cooling fan",
+										"Part cooling fan percentage.",
+										&mut self.settings.fan,
+										0.0..=100.,
+										" %",
+									),
+								],
+							),
+						] {
+							ui.separator();
+							ui.strong(title);
+							for (label, description, value, range, unit) in fields {
+								configuration_row(ui, label, description, |ui| {
+									input_field(ui, |ui| {
+										ui.add_sized(
+											[150., 26.],
+											egui::DragValue::new(value).range(range).speed(0.1).suffix(unit),
+										)
+									});
+								});
+							}
 						}
-					}
-					ui.allocate_ui_with_layout(
-						egui::Vec2::new(360., 46.),
-						egui::Layout::left_to_right(egui::Align::Center),
-						|ui| {
-							ui.allocate_ui_with_layout(
-								egui::Vec2::new(210., 46.),
-								egui::Layout::top_down(egui::Align::Min),
-								|ui| {
-									ui.label(RichText::new("Top / bottom solid layers").color(TITLE));
-									ui.label(
-										RichText::new("Number of fully solid layers at each end.")
-											.size(12.)
-											.color(MUTED),
-									);
-								},
-							);
-							ui.allocate_ui_with_layout(
-								egui::Vec2::new(120., 46.),
-								egui::Layout::left_to_right(egui::Align::Center),
-								|ui| {
+						configuration_row(
+							ui,
+							"Top / bottom solid layers",
+							"Number of fully solid layers at each end.",
+							|ui| {
+								input_field(ui, |ui| {
 									ui.add_sized(
-										[120., 24.],
+										[150., 26.],
 										egui::DragValue::new(&mut self.settings.solid_layers).range(0..=20),
-									);
-								},
-							);
-						},
-					);
-					ui.allocate_ui_with_layout(
-						egui::Vec2::new(360., 46.),
-						egui::Layout::left_to_right(egui::Align::Center),
-						|ui| {
-							let description = match self.settings.infill_pattern {
-								InfillPattern::ZigZag => "Fast and economical.",
-								InfillPattern::Lines => "Simple and material-efficient.",
-								InfillPattern::Grid => "Stable square structure.",
-								InfillPattern::Triangles => "Strong multi-direction structure.",
-								InfillPattern::Gyroid => "Balanced strength in multiple directions.",
-								InfillPattern::Cubic => "Lightweight 3D-style structure.",
-								InfillPattern::Concentric => "Follows a simple repeated direction.",
-								InfillPattern::Lightning => "Minimal material for low-stress interiors.",
-							};
-							ui.allocate_ui_with_layout(
-								egui::Vec2::new(210., 46.),
-								egui::Layout::top_down(egui::Align::Min),
-								|ui| {
-									ui.label(RichText::new("Infill pattern").color(TITLE));
-									ui.label(RichText::new(description).size(12.).color(MUTED));
-								},
-							);
-							ui.allocate_ui_with_layout(
-								egui::Vec2::new(120., 46.),
-								egui::Layout::left_to_right(egui::Align::Center),
-								|ui| {
-									egui::ComboBox::from_id_salt("infill-pattern")
-										.width(120.)
-										.selected_text(self.settings.infill_pattern.label())
-										.show_ui(ui, |ui| {
-											for pattern in InfillPattern::ALL {
-												ui.selectable_value(
-													&mut self.settings.infill_pattern,
-													pattern,
-													pattern.label(),
-												);
-											}
-										});
-								},
-							);
-						},
-					);
-					if before != self.settings {
-						self.profile = 3;
-						self.invalidate();
-					}
-					if let Err(error) = self.settings.validate() {
-						ui.colored_label(Color32::LIGHT_RED, error);
-					}
-					ui.separator();
-					ui.horizontal(|ui| {
-						if ui.button("Import settings…").clicked() {
-							self.import_settings();
-						}
-						if ui
-							.add_enabled(
-								self.settings.validate().is_ok(),
-								egui::Button::new("Export settings…"),
-							)
-							.clicked()
-						{
-							self.export_settings();
-						}
-						if ui.button("Reset").clicked() {
-							let printer = self.settings.printer.clone();
-							self.settings = Settings::default();
-							self.settings.nozzle = printer.nozzle;
-							self.settings.printer = printer;
-							self.profile = 1;
+									)
+								});
+							},
+						);
+						let description = match self.settings.infill_pattern {
+							InfillPattern::ZigZag => "Fast and economical.",
+							InfillPattern::Lines => "Simple and material-efficient.",
+							InfillPattern::Grid => "Stable square structure.",
+							InfillPattern::Triangles => "Strong multi-direction structure.",
+							InfillPattern::Gyroid => "Balanced strength in multiple directions.",
+							InfillPattern::Cubic => "Lightweight 3D-style structure.",
+							InfillPattern::Concentric => "Follows a simple repeated direction.",
+							InfillPattern::Lightning => "Minimal material for low-stress interiors.",
+						};
+						configuration_row(ui, "Infill pattern", description, |ui| {
+							input_field(ui, |ui| {
+								egui::ComboBox::from_id_salt("infill-pattern")
+									.width(150.)
+									.selected_text(self.settings.infill_pattern.label())
+									.show_ui(ui, |ui| {
+										for pattern in InfillPattern::ALL {
+											ui.selectable_value(
+												&mut self.settings.infill_pattern,
+												pattern,
+												pattern.label(),
+											);
+										}
+									})
+							});
+						});
+						if before != self.settings {
+							self.profile = 3;
 							self.invalidate();
 						}
 					});
+				if let Err(error) = self.settings.validate() {
+					ui.colored_label(Color32::LIGHT_RED, error);
+				}
+				ui.separator();
+				ui.horizontal_wrapped(|ui| {
+					if ui.add(modal_button("Import settings…")).clicked() {
+						self.import_settings();
+					}
+					if ui
+						.add_enabled(self.settings.validate().is_ok(), modal_button("Export settings…"))
+						.clicked()
+					{
+						self.export_settings();
+					}
+					if ui.add(modal_button("Reset")).clicked() {
+						let printer = self.settings.printer.clone();
+						self.settings = Settings::default();
+						self.settings.nozzle = printer.nozzle;
+						self.settings.printer = printer;
+						self.profile = 1;
+						self.invalidate();
+					}
+					if ui.add(modal_primary_button("Done")).clicked() {
+						close_settings = true;
+					}
 				});
 			});
-		self.show_settings = show;
+		self.show_settings = show && !close_settings;
+		let mut show_help = self.show_help;
+		let mut close_help = false;
 		egui::Window::new("About your workspace")
-			.open(&mut self.show_help)
+			.open(&mut show_help)
+			.frame(modal_frame(ctx))
 			.resizable(true)
+			.default_width(580.)
+			.max_height(620.)
+			.vscroll(true)
 			.show(ctx, |ui| {
-				ui.heading("3printer");
+				modal_header(ui, "3printer", "A local workspace for preparing models for 3D printing.");
 				ui.label(format!("Version {} · {}", updater::CURRENT_VERSION, updater::platform_name()));
-				if self.update.latest.is_some() && ui.button("Update now").clicked() {
+				if self.update.latest.is_some()
+					&& centered_sized_button(ui, [116., 40.], modal_primary_button("Update now"))
+						.clicked()
+				{
 					self.show_update_prompt = true;
 				}
-				ui.horizontal(|ui| {
-					if ui.button("Report bug").clicked() {
+				ui.horizontal_wrapped(|ui| {
+					if ui.add(modal_button("Report bug")).clicked() {
 						if let Err(error) = open_github_issue(
 							"https://github.com/neutrononl/3printer/issues/new?template=bug_report.yml",
 						) {
 							self.status = error;
 						}
 					}
-					if ui.button("Request feature").clicked() {
+					if ui.add(modal_button("Request feature")).clicked() {
 						if let Err(error) = open_github_issue(
 							"https://github.com/neutrononl/3printer/issues/new?template=feature_request.yml",
 						) {
@@ -2313,7 +2394,6 @@ impl eframe::App for Studio {
 						}
 					}
 				});
-				ui.label("A local desktop workspace for preparing models for 3D printing.");
 				ui.separator();
 				ui.strong("Workflow");
 				ui.label("Import STL, OBJ, or 3MF models, then select, move, rotate, scale, clone, and center them on the build plate.");
@@ -2324,97 +2404,73 @@ impl eframe::App for Studio {
 				ui.label("Right-drag orbits the view. The mouse wheel zooms. Drag files onto the window to import them.");
 				ui.separator();
 				ui.label("3printer includes a basic local slicer with single-wall contours, alternating line infill, and support pillars. Cloud services, network printing, model repair, and the original advanced slicing engine are not connected.");
-				ui.colored_label(Color32::YELLOW, "G-code is experimental. Inspect toolpaths and verify printer compatibility before using it with hardware.");
+				ui.label("G-code is experimental. Inspect toolpaths and verify printer compatibility before using it with hardware.");
+				ui.separator();
+				if centered_sized_button(ui, [116., 40.], modal_button("Close")).clicked() {
+					close_help = true;
+				}
 			});
-		if self.show_updates {
-			let mut show = self.show_updates;
-			egui::Window::new("3printer Updates")
-				.open(&mut show)
+		self.show_help = show_help && !close_help;
+		if self.show_update_prompt {
+			let mut open = true;
+			let mut later = false;
+			let mut download = false;
+			let mut pause = false;
+			let mut stop = false;
+			let mut install = false;
+			let mut check = false;
+			egui::Window::new("Update")
+				.open(&mut open)
+				.frame(modal_frame(ctx))
+				.collapsible(false)
 				.resizable(false)
-				.default_width(420.)
+				.default_width(480.)
 				.show(ctx, |ui| {
-					ui.heading("Updates");
-					ui.label(format!(
-						"Current version: {} · {}",
-						updater::CURRENT_VERSION,
-						updater::platform_name()
-					));
 					let previous = self.update.auto_check;
-					ui.checkbox(&mut self.update.auto_check, "Check for updates automatically");
+					ui.checkbox(
+						&mut self.update.auto_check,
+						"Check for updates when 3printer starts",
+					);
 					if previous != self.update.auto_check {
 						updater::save_auto_check(self.update.auto_check);
 					}
-					if self.update.checking {
-						ui.label("Checking GitHub for the latest release…");
-					} else if self.update.downloading {
-						ui.label("Downloading update in the background…");
-					} else if let Some(version) =
-						self.update.latest.as_ref().map(|release| release.version.clone())
-					{
-						ui.label(format!("Latest version: {version}"));
-						if ui.button("Update now").clicked() {
-							self.show_update_prompt = true;
-						}
-					} else if self.update.checked && self.update.error.is_none() {
-						ui.label("You have the latest version.");
-					}
-					if let Some(error) = &self.update.error {
-						let color = if error.starts_with("No published release") {
-							Color32::LIGHT_YELLOW
-						} else {
-							Color32::LIGHT_RED
-						};
-						ui.colored_label(color, error);
-					}
-					if !self.update_message.is_empty() {
-						ui.label(&self.update_message);
-					}
-					if ui
-						.add_enabled(
-							!self.update.checking
-								&& !self.update.downloading
-								&& !self.update.paused && self.update.downloaded.is_none(),
-							egui::Button::new("Check now"),
-						)
-						.clicked()
-					{
-						self.update.start_check();
-					}
-				});
-			self.show_updates = show;
-		}
-		if self.show_update_prompt {
-			let mut open = true;
-			let mut cancel = false;
-			let mut download = false;
-			let mut pause = false;
-			let mut install = false;
-			egui::Window::new("Update available")
-				.open(&mut open)
-				.collapsible(false)
-				.resizable(false)
-				.default_width(460.)
-				.show(ctx, |ui| {
-					ui.heading(if self.update.downloaded.is_some() {
-						"Ready to install"
-					} else {
-						"3printer update"
-					});
-					ui.add_space(5.);
+					ui.separator();
 					if let Some(release) = &self.update.latest {
 						ui.label(
 							RichText::new(format!(
-								"Version {}  →  {}",
+								"Version {} → {}",
 								updater::CURRENT_VERSION,
 								release.version
 							))
 							.size(16.)
 							.strong(),
 						);
-						ui.label(format!("{} · {}", updater::platform_name(), release.asset_name));
+						ui.label(RichText::new(&release.asset_name).small().color(MUTED));
+					} else {
+						ui.label(format!(
+							"Version {} · {}",
+							updater::CURRENT_VERSION,
+							updater::platform_name()
+						));
 					}
 					ui.add_space(8.);
-					if self.update.downloading || self.update.paused || self.update.downloaded.is_some() {
+					if self.update.checking {
+						ui.horizontal(|ui| {
+							ui.spinner();
+							ui.label("Checking for updates…");
+						});
+					} else if self.update.downloading
+						|| self.update.paused
+						|| self.update.downloaded.is_some()
+					{
+						let status = if self.update.downloaded.is_some() {
+							"Ready to install · SHA-256 verified"
+						} else if self.update.paused {
+							"Download paused"
+						} else {
+							"Downloading…"
+						};
+						ui.label(status);
 						let fraction = if self.update.total_bytes > 0 {
 							(self.update.downloaded_bytes as f32 / self.update.total_bytes as f32)
 								.clamp(0., 1.)
@@ -2424,79 +2480,95 @@ impl eframe::App for Studio {
 						ui.add(
 							egui::ProgressBar::new(fraction)
 								.show_percentage()
-								.desired_width(440.),
+								.desired_width(ui.available_width()),
 						);
-						ui.label(format!(
-							"{:.1} / {:.1} MB · {}",
-							self.update.downloaded_bytes as f64 / 1_000_000.,
-							self.update.total_bytes as f64 / 1_000_000.,
-							if self.update.downloaded.is_some() {
-								"SHA-256 verified"
-							} else if self.update.paused {
-								"Paused"
-							} else {
-								"Downloading"
-							}
-						));
-					}
-					if self.update.checking {
-						ui.label("Checking GitHub for updates…");
-					}
-					if self.update.checked && self.update.latest.is_none() && self.update.error.is_none() {
-						ui.label("You have the latest version.");
-					}
-					if let Some(error) = &self.update.error {
+						ui.label(
+							RichText::new(format!(
+								"{:.1} / {:.1} MB",
+								self.update.downloaded_bytes as f64 / 1_000_000.,
+								self.update.total_bytes as f64 / 1_000_000.
+							))
+							.color(MUTED),
+						);
+					} else if let Some(error) = &self.update.error {
 						ui.colored_label(Color32::LIGHT_RED, error);
+					} else if self.update.latest.is_some() {
+						ui.label("Ready to download.");
+					} else if self.update.checked {
+						ui.label("You have the latest version.");
+					} else {
+						ui.label("Check for a newer version.");
 					}
 					if !self.update_message.is_empty() {
-						ui.label(&self.update_message);
+						ui.colored_label(Color32::LIGHT_RED, &self.update_message);
 					}
-					ui.add_space(8.);
-					ui.horizontal(|ui| {
-						if ui.button("Close").clicked() {
-							cancel = true;
+					ui.add_space(10.);
+					ui.separator();
+					ui.horizontal_wrapped(|ui| {
+						if ui.add(modal_button("Later")).clicked() {
+							later = true;
 						}
-						if self.update.downloading && ui.button("Pause").clicked() {
-							pause = true;
-						}
-						if ui
-							.add_enabled(
-								self.update.latest.is_some()
-									&& !self.update.downloading && !self.update.checking,
-								egui::Button::new(if self.update.downloaded.is_some() {
-									"Install and relaunch"
-								} else if self.update.paused {
-									"Continue download"
-								} else {
-									"Download update"
-								}),
-							)
-							.clicked()
-						{
-							if self.update.downloaded.is_some() {
-								install = true;
-							} else {
+						if self.update.downloading {
+							if ui.add(modal_primary_button("Pause")).clicked() {
+								pause = true;
+							}
+							if ui.add(modal_button("Stop download")).clicked() {
+								stop = true;
+							}
+						} else if self.update.paused {
+							if ui.add(modal_primary_button("Resume")).clicked() {
 								download = true;
 							}
-						}
-						if self.update.latest.is_none()
-							&& !self.update.checking
-							&& ui.button("Check now").clicked()
+							if ui.add(modal_button("Stop download")).clicked() {
+								stop = true;
+							}
+						} else if self.update.downloaded.is_some() {
+							if ui.add(modal_primary_button("Install and relaunch")).clicked() {
+								install = true;
+							}
+							if ui.add(modal_button("Discard download")).clicked() {
+								stop = true;
+							}
+						} else if self.update.latest.is_some() {
+							if ui
+								.add(modal_primary_button(if self.update.error.is_some() {
+									"Retry download"
+								} else {
+									"Download update"
+								}))
+								.clicked()
+							{
+								download = true;
+							}
+							if self.update.has_partial_download()
+								&& ui.add(modal_button("Stop download")).clicked()
+							{
+								stop = true;
+							}
+						} else if !self.update.checking && ui.add(modal_primary_button("Check now")).clicked()
 						{
-							self.update.start_check();
+							check = true;
 						}
 					});
 				});
-			if cancel {
+			if later {
 				open = false;
 			}
 			self.show_update_prompt = open;
 			if pause {
 				self.update.pause_download();
 			}
+			if stop {
+				self.update.stop_download();
+				self.update_message.clear();
+			}
 			if download {
 				self.update_message.clear();
 				self.update.start_download();
+			}
+			if check {
+				self.update_message.clear();
+				self.update.start_check();
 			}
 			if install {
 				if self.has_unsaved_changes() {
@@ -2513,30 +2585,52 @@ impl eframe::App for Studio {
 			}
 		}
 		if self.show_license {
+			let mut show_license = self.show_license;
+			let mut close_license = false;
 			egui::Window::new("3printer License")
-				.open(&mut self.show_license)
+				.open(&mut show_license)
+				.frame(modal_frame(ctx))
 				.resizable(true)
-				.default_size([620., 420.])
+				.default_size([680., 480.])
 				.show(ctx, |ui| {
+					modal_header(ui, "CORE License", "Terms for using and sharing 3printer.");
 					ui.label("3printer is distributed under the CORE License.");
 					ui.separator();
-					egui::ScrollArea::vertical().show(ui, |ui| {
+					egui::ScrollArea::vertical().max_height(360.).show(ui, |ui| {
 						ui.add(
 							egui::Label::new(RichText::new(include_str!("../LICENSE")).monospace())
 								.selectable(true),
 						);
 					});
+					ui.separator();
+					if centered_sized_button(ui, [116., 40.], modal_button("Close")).clicked() {
+						close_license = true;
+					}
 				});
+			self.show_license = show_license && !close_license;
 		}
 		if self.code_view {
+			let mut code_view = self.code_view;
+			let mut close_code = false;
 			egui::Window::new("G-code preview")
-				.open(&mut self.code_view)
-				.default_size([600., 450.])
+				.open(&mut code_view)
+				.frame(modal_frame(ctx))
+				.default_size([700., 520.])
 				.show(ctx, |ui| {
-					egui::ScrollArea::both().show(ui, |ui| {
+					modal_header(
+						ui,
+						"G-code preview",
+						"Inspect the generated commands before exporting.",
+					);
+					egui::ScrollArea::both().max_height(400.).show(ui, |ui| {
 						ui.add(egui::Label::new(RichText::new(&self.code).monospace()).selectable(true));
 					});
+					ui.separator();
+					if centered_sized_button(ui, [116., 40.], modal_button("Close")).clicked() {
+						close_code = true;
+					}
 				});
+			self.code_view = code_view && !close_code;
 		}
 		if self.screenshot.is_some() {
 			if self.frame >= 120 && !self.requested {

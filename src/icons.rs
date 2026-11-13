@@ -138,6 +138,23 @@ fn paint(p: &egui::Painter, origin: Pos2, name: &str, color: Color32) {
 			&[[10., 12.], [12., 14.], [16., 10.]],
 		],
 		"check" => &[&[[20., 6.], [9., 17.], [4., 12.]]],
+		"printer" => &[
+			&[[6., 9.], [6., 3.], [18., 3.], [18., 9.]],
+			&[
+				[6., 18.],
+				[4., 18.],
+				[3., 17.],
+				[3., 10.],
+				[4., 9.],
+				[20., 9.],
+				[21., 10.],
+				[21., 17.],
+				[20., 18.],
+				[18., 18.],
+			],
+			&[[6., 15.], [18., 15.], [18., 21.], [6., 21.], [6., 15.]],
+			&[[17., 12.], [18., 12.]],
+		],
 		"settings" => &[
 			&[[4., 21.], [4., 14.]],
 			&[[4., 10.], [4., 3.]],
@@ -196,8 +213,8 @@ pub fn action(ui: &mut egui::Ui, name: &str, label: &str, shortcut: &str, select
 	}
 	paint(ui.painter(), r.min + Vec2::new(7., 10.), name, color);
 	ui.painter().text(
-		r.min + Vec2::new(35., 20.),
-		egui::Align2::LEFT_CENTER,
+		r.center(),
+		egui::Align2::CENTER_CENTER,
 		label,
 		egui::FontId::proportional(12.),
 		color,
@@ -292,7 +309,8 @@ pub fn menu_item(ui: &mut egui::Ui, name: &str, label: &str, shortcut: &str) -> 
 	let label = ui.painter().layout_no_wrap(label.into(), font.clone(), color);
 	let shortcut = ui.painter().layout_no_wrap(shortcut.into(), font, color);
 	// Reserve actual columns: whitespace in Button text is trimmed by egui.
-	let width = (36. + label.size().x + 24. + shortcut.size().x + 10.).max(260.);
+	let side = (shortcut.size().x + 12.).max(36.);
+	let width = (label.size().x + 2. * side + 20.).max(260.);
 	let response = ui.add(egui::Button::new("").min_size(Vec2::new(width, 32.)));
 	let color = if ui.is_enabled() {
 		Color32::WHITE
@@ -308,15 +326,25 @@ pub fn menu_item(ui: &mut egui::Ui, name: &str, label: &str, shortcut: &str) -> 
 		name,
 		color,
 	);
-	ui.painter().galley_with_override_text_color(
-		response.rect.left_center() + Vec2::new(36., -label.size().y / 2.),
-		label,
-		color,
-	);
+	ui.painter()
+		.galley_with_override_text_color(response.rect.center() - label.size() / 2., label, color);
 	ui.painter().galley_with_override_text_color(
 		response.rect.right_center() - Vec2::new(10. + shortcut.size().x, shortcut.size().y / 2.),
 		shortcut,
 		color,
 	);
+	response
+}
+
+pub fn printer_menu_item(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+	let response = menu_item(ui, "printer", label, "");
+	if selected {
+		paint(
+			ui.painter(),
+			response.rect.right_center() + Vec2::new(-27., -10.),
+			"check",
+			ui.visuals().text_color(),
+		);
+	}
 	response
 }

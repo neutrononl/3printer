@@ -293,10 +293,15 @@ impl Model {
 		model.position = [100., 100., 0.];
 		Ok(model)
 	}
+	#[cfg(test)]
 	pub fn vertex(&self, v: V3) -> V3 {
+		let rotation = self.rotation.map(|angle| angle.to_radians().sin_cos());
+		self.vertex_with_rotation(v, &rotation)
+	}
+	fn vertex_with_rotation(&self, v: V3, rotation: &[(f32, f32); 3]) -> V3 {
 		let mut v = v.map(|x| x * self.scale);
 		for axis in 0..3 {
-			let (s, c) = self.rotation[axis].to_radians().sin_cos();
+			let (s, c) = rotation[axis];
 			let a = (axis + 1) % 3;
 			let b = (axis + 2) % 3;
 			let x = v[a] * c - v[b] * s;
@@ -309,14 +314,19 @@ impl Model {
 		v
 	}
 	pub fn transformed(&self) -> Vec<Triangle> {
-		self.triangles.iter().map(|t| t.map(|v| self.vertex(v))).collect()
+		let rotation = self.rotation.map(|angle| angle.to_radians().sin_cos());
+		self.triangles
+			.iter()
+			.map(|t| t.map(|v| self.vertex_with_rotation(v, &rotation)))
+			.collect()
 	}
 	pub fn bounds(&self) -> (V3, V3) {
+		let rotation = self.rotation.map(|angle| angle.to_radians().sin_cos());
 		let mut lo = [f32::INFINITY; 3];
 		let mut hi = [f32::NEG_INFINITY; 3];
 		for tri in &self.triangles {
 			for v in tri {
-				let v = self.vertex(*v);
+				let v = self.vertex_with_rotation(*v, &rotation);
 				for a in 0..3 {
 					lo[a] = lo[a].min(v[a]);
 					hi[a] = hi[a].max(v[a]);

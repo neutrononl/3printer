@@ -1,6 +1,6 @@
 [package]
 name = "printer3"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [[bin]]
@@ -20,5 +20,5 @@ serde = { version = "1", features = ["derive"] }
 objc = "0.2.7"
 
 # objc 0.2 macros reference this legacy feature in the destination crate.
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+[features]
+cargo-clippy = []

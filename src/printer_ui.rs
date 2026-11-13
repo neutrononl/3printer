@@ -10,12 +10,14 @@ fn number(
 ) {
 	ui.label(label).on_hover_text(description);
 	let speed = if *range.end() <= 2. { 0.01 } else { 0.1 };
-	ui.add(
-		egui::DragValue::new(value)
-			.range(range)
-			.speed(speed)
-			.suffix(" mm"),
-	);
+	crate::input_field(ui, |ui| {
+		ui.add(
+			egui::DragValue::new(value)
+				.range(range)
+				.speed(speed)
+				.suffix(" mm"),
+		)
+	});
 }
 
 fn script(ui: &mut egui::Ui, id: &str, title: &str, hint: &str, value: &mut String) {
@@ -30,12 +32,14 @@ fn script(ui: &mut egui::Ui, id: &str, title: &str, hint: &str, value: &mut Stri
 			.id_salt(id)
 			.max_height(175.)
 			.show(ui, |ui| {
-				ui.add(
-					egui::TextEdit::multiline(value)
-						.code_editor()
-						.desired_rows(8)
-						.desired_width(f32::INFINITY),
-				);
+				crate::input_field(ui, |ui| {
+					ui.add(
+						egui::TextEdit::multiline(value)
+							.code_editor()
+							.desired_rows(8)
+							.desired_width(f32::INFINITY),
+					)
+				});
 			});
 	});
 }
@@ -47,7 +51,9 @@ pub fn content(ui: &mut egui::Ui, p: &mut Printer, tab: usize) {
 			ui.horizontal(|ui| {
 				ui.label("Profile name")
 					.on_hover_text("Name used to identify this printer profile.");
-				ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(380.));
+				crate::input_field(ui, |ui| {
+					ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(380.))
+				});
 			});
 			ui.add_space(8.);
 			ui.strong("Build volume");
@@ -64,24 +70,28 @@ pub fn content(ui: &mut egui::Ui, p: &mut Printer, tab: usize) {
 					.show(ui, |ui| {
 						ui.label("Build plate shape")
 							.on_hover_text("Shape used for placement and printer boundary checks.");
-						egui::ComboBox::from_id_salt("plate-shape")
-							.width(140.)
-							.selected_text(if p.circular_bed {
-								"Elliptic / circular"
-							} else {
-								"Rectangular"
-							})
-							.show_ui(ui, |ui| {
-								ui.selectable_value(&mut p.circular_bed, false, "Rectangular");
-								ui.selectable_value(&mut p.circular_bed, true, "Elliptic / circular");
-							});
+						crate::input_field(ui, |ui| {
+							egui::ComboBox::from_id_salt("plate-shape")
+								.width(140.)
+								.selected_text(if p.circular_bed {
+									"Elliptic / circular"
+								} else {
+									"Rectangular"
+								})
+								.show_ui(ui, |ui| {
+									ui.selectable_value(&mut p.circular_bed, false, "Rectangular");
+									ui.selectable_value(&mut p.circular_bed, true, "Elliptic / circular");
+								})
+						});
 						ui.label("Maximum height")
 							.on_hover_text("Maximum printable Z height.");
-						ui.add(
-							egui::DragValue::new(&mut p.size[2])
-								.range(20. ..=2000.)
-								.suffix(" mm"),
-						);
+						crate::input_field(ui, |ui| {
+							ui.add(
+								egui::DragValue::new(&mut p.size[2])
+									.range(20. ..=2000.)
+									.suffix(" mm"),
+							)
+						});
 						ui.end_row();
 						number(
 							ui,
@@ -126,21 +136,22 @@ pub fn content(ui: &mut egui::Ui, p: &mut Printer, tab: usize) {
 				ui.set_min_width(ui.available_width());
 				egui::Grid::new("printer-head").num_columns(4).spacing([18., 10.]).show(ui, |ui| {
 					ui.label("Extruder type").on_hover_text("Describes the filament drive position.");
-					egui::ComboBox::from_id_salt("extruder-drive").width(140.).selected_text(if p.direct_drive { "Direct drive" } else { "Distal / Bowden" }).show_ui(ui, |ui| {
+					crate::input_field(ui, |ui| egui::ComboBox::from_id_salt("extruder-drive").width(140.).selected_text(if p.direct_drive { "Direct drive" } else { "Distal / Bowden" }).show_ui(ui, |ui| {
 						ui.selectable_value(&mut p.direct_drive, false, "Distal / Bowden");
 						ui.selectable_value(&mut p.direct_drive, true, "Direct drive");
-					});
+					}));
 					number(ui, "Nozzle diameter", "Diameter used for line width and extrusion calculations.", &mut p.nozzle, 0.1..=2.);
 					ui.end_row();
 					ui.label("G-code flavor").on_hover_text("Command dialect emitted by the slicer.");
 					ui.add_enabled(false, egui::Button::new("Marlin")).on_hover_text("The current slicer exports Marlin G-code.");
 					ui.label("Number of extruders").on_hover_text("Number of independently controlled nozzles.");
-					ui.add_enabled(false, egui::DragValue::new(&mut 1)).on_hover_text("The current slicer supports one extruder.");
+					crate::input_field(ui, |ui| ui.add_enabled(false, egui::DragValue::new(&mut 1)))
+						.on_hover_text("The current slicer supports one extruder.");
 					ui.end_row();
 				});
 				ui.add_space(8.);
 				ui.label("Machine head & fan polygon (mm)").on_hover_text("Machine-head footprint used for future clearance checks.");
-				ui.add(egui::TextEdit::singleline(&mut p.head_polygon).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY));
+				crate::input_field(ui, |ui| ui.add(egui::TextEdit::singleline(&mut p.head_polygon).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY)));
 				ui.label(RichText::new("Head footprint and drive type are saved with the profile. Sequential-print clearance and drive-specific retraction are not applied by this slicer.").small().color(Color32::GRAY));
 			});
 		}
